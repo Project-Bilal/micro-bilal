@@ -8,7 +8,6 @@ from mqtt import mqtt_run
 import machine
 
 async def startup():
-    
     ip = wifi_connect()
     
     if ip:
