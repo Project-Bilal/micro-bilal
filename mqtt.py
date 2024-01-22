@@ -1,8 +1,9 @@
 import utime as time
 import ujson as json
-from umqtt.simple import MQTTClient
+from umqtt.robust import MQTTClient
 from utils import get_mac, led_toggle
 import cast
+import machine
 
 def mqtt_connect():
     with open("connection.json", "r") as file:
@@ -46,13 +47,6 @@ def sub_cb(topic, msg):
             
             if url and ip and port and volume:
                 play(url=url, ip=ip, port=port, vol=volume)
-            else:
-                print("missing one of: url, ip, port, volume")
-                
-        else:
-            print("invalid action")
-    else:
-        print("action and prop needed in message")
     
     processing_message = False
     return
@@ -77,12 +71,14 @@ def mqtt_run():
     global processing_message
     processing_message = False
     
-    mqtt = mqtt_connect()
-
-    while True:
-        time.sleep(1)
+    try:
+        mqtt = mqtt_connect()
     
-        # Check if we are currently processing a message, if not, check for new messages
-        if not processing_message:
-            mqtt.check_msg()
-
+        while True:
+            time.sleep(1)
+        
+            # Check if we are currently processing a message, if not, check for new messages
+            if not processing_message:
+                mqtt.check_msg()
+    except:
+        machine.reset()

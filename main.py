@@ -8,13 +8,11 @@ from mqtt import mqtt_run
 import machine
 
 async def startup():
+    
     ip = wifi_connect()
     
     if ip:
         return ip
-    
-    
-    print("Starting BLE server, was not able to connect to WiFi")
     
     with open("connection.json", "r") as file:
         data = json.load(file)
@@ -41,7 +39,6 @@ async def startup():
             services=[SERVICE_UUID],
         ) as connection:
             char.write(longest_message)
-            print("Connection from", connection.device)
             while True:
                 time.sleep(1)
                 message = char.read()
@@ -64,17 +61,12 @@ async def startup():
                             char.notify(connection, b"wifiError")
                             time.sleep(1) # let the phone app recieve the message before disconnecting
                             machine.reset() # restart so the user can attempt to connect again
-                    except Exception as e:
-                        print(e)
+                    except:
                         print("need to handle me somehow")
-    
+
 def main():
     ip = asyncio.run(startup()) # connect to WiFi or advertise BLE
     get_aws_cert() # downloads aws root-CA.crt if not here
     mqtt_run() # startup MQTT client listening for messagses
     
 main()
-    
-    
-
-

@@ -41,7 +41,6 @@ class Chromecast(object):
                 try:
                     response = self.read_message()
                     transport_id = response.split(b'"transportId"')[1].split(b'"')[1]
-                    print(transport_id)
                 except:
                     pass
             self.s.write(b'\x00\x00\x01Q\x08\x00\x12\x08sender-0\x1a$%s"(urn:x-cast:com.google.cast.tp.connection(\x002\xf0\x01{"type": "CONNECT", "origin": {}, "userAgent": "PyChromecast", "senderInfo": {"sdkType": 2, "version": "15.605.1.3", "browserVersion": "44.0.2403.30", "platform": 4, "systemVersion": "Macintosh; Intel Mac OS X10_10_3", "connectionType": 1}}' % transport_id)
