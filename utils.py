@@ -1,3 +1,5 @@
+# Description: Utility functions for the ESP32
+
 import network
 import utime as time
 import ujson as json
@@ -9,36 +11,38 @@ import os
 CERT_URL = "https://www.amazontrust.com/repository/AmazonRootCA1.pem"
 CERT_FILE = "root-CA.crt"
 
-# toggle the LED for debugging
+
+# toggle the LED for certain situations
 def led_toggle(info=None):
-    
-    # update this to work with pico
+    # TODO: update this to work with pico
     LED = Pin(2, Pin.OUT)
-    
+
     if not info:
         i = 8
-    elif info == 'wifi':
+    elif info == "wifi":
         i = 6
-    elif info == 'mqtt':
+    elif info == "mqtt":
         i = 4
     else:
         i = 8
     for x in range(i):
-      LED.value(not LED.value())
-      time.sleep(.25)
+        LED.value(not LED.value())
+        time.sleep(0.25)
     LED.off()
-    
-# toggle the LED for debugging
+
+
+# turn the LED on
 def led_on():
-    
-    # update this to work with pico
+    # TODO: update this to work with pico
     Pin(2, Pin.OUT).on()
 
+
 # get mac address for mqtt connection
-def get_mac():
+def get_mac():  # TODO: update this to work with pico
     mac_hex = machine.unique_id()
     mac = "-".join("%02x" % b for b in mac_hex)
     return mac
+
 
 # connect to wifi and return ip
 def wifi_connect():
@@ -46,7 +50,8 @@ def wifi_connect():
         data = json.load(file)
         SSID = data.get("SSID")
         PASS = data.get("PASSWORD")
-        
+
+    # if the SSID or PASSWORD is not set, return None
     if SSID is None or PASS is None:
         return None
 
@@ -60,24 +65,23 @@ def wifi_connect():
     while not wlan.isconnected() and timeout > 0:
         time.sleep(1)
         timeout -= 1
-        
+
     if not wlan.isconnected():
         return None  # Return None to indicate failed Wi-Fi connection
-        
-    led_toggle('wifi')
+
+    led_toggle("wifi")
     return wlan.ifconfig()[0]
 
 
 def get_aws_cert():
-    
     # skip if file is there
     if CERT_FILE in os.listdir():
         return
-    
+
     response = urequests.get(CERT_URL)
 
     if response.status_code == 200:
-        with open(CERT_FILE, 'wb') as file:
+        with open(CERT_FILE, "wb") as file:
             file.write(response.content)
 
     response.close()
