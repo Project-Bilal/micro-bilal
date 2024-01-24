@@ -8,9 +8,6 @@ from utils import get_mac, led_toggle
 import cast
 import machine
 
-# flag to indicate if we are currently processing a message
-processing_message = False
-
 
 # create the mqtt connection and subscribe to the topic
 def mqtt_connect():
@@ -41,12 +38,7 @@ def mqtt_connect():
 
 # callback function for when we get a message
 def sub_cb(topic, msg):
-    global processing_message
-
     msg = json.loads(msg)
-
-    # Set the flag to indicate that we are processing a message
-    processing_message = True
 
     # flash to identify new incoming message
     led_toggle("mqtt")
@@ -66,10 +58,6 @@ def sub_cb(topic, msg):
                 # if we have all the required properties, play the audio
                 play(url=url, ip=ip, port=port, vol=volume)
 
-    # Set the flag to indicate that we are done processing the message
-    processing_message = False
-    return
-
 
 # this function uses cast.py to play the audio
 def play(url, ip, port, vol):
@@ -88,19 +76,9 @@ def play(url, ip, port, vol):
 
 # this function is called from main.py and runs the mqtt client indefinitely
 def mqtt_run():
-    global processing_message
-    processing_message = False
+    mqtt = mqtt_connect()
 
-    try:
-        mqtt = mqtt_connect()
-
-        while True:
-            time.sleep(1)
-
-            # Check if we are currently processing a message, if not, check for new messages
-            if not processing_message:
-                # Check for new messages
-                mqtt.check_msg()
-    except:
-        # if anything goes wrong, restart the device
-        machine.reset()
+    while True:
+        time.sleep(1)
+        # Check for new messages
+        mqtt.check_msg()

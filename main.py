@@ -66,45 +66,41 @@ async def startup():
                 )  # read the message from the phone app looking for WiFi credentials
                 if message and message != longest_message:
                     message = message.decode()
-                    try:
-                        new_data = json.loads(message)
+                    new_data = json.loads(message)
+                    if (
+                        new_data["KEY"] == KEY
+                    ):  # make sure that the message is from the phone app
+                        del new_data["KEY"]
+                        with open("connection.json", "r") as file:
+                            data = json.load(file)
+                        data.update(
+                            new_data
+                        )  # update the credentials in the connection.json file
+                        with open("connection.json", "w") as file:
+                            json.dump(
+                                data, file
+                            )  # write the updated credentials to the connection.json file
+                        ip = (
+                            wifi_connect()
+                        )  # try to connect to WiFi with the new credentials
                         if (
-                            new_data["KEY"] == KEY
-                        ):  # make sure that the message is from the phone app
-                            del new_data["KEY"]
-                            with open("connection.json", "r") as file:
-                                data = json.load(file)
-                            data.update(
-                                new_data
-                            )  # update the credentials in the connection.json file
-                            with open("connection.json", "w") as file:
-                                json.dump(
-                                    data, file
-                                )  # write the updated credentials to the connection.json file
-                            ip = (
-                                wifi_connect()
-                            )  # try to connect to WiFi with the new credentials
-                            if (
-                                ip
-                            ):  # if we are connected to WiFi, restart the device so that we can connect to MQTT
-                                # notify the phone app that we are restarting
-                                char.notify(
-                                    connection,
-                                    b"Updated the credentials, restarting device...",
-                                )
-                                time.sleep(
-                                    1
-                                )  # let the phone app recieve the message before disconnecting
-                                machine.reset()  # restart so that we can connect to WiFi
-                            else:  # if we are not connected to WiFi, notify the phone app that the credentials are incorrect
-                                char.notify(connection, b"wifiError")
-                                time.sleep(
-                                    1
-                                )  # let the phone app recieve the message before disconnecting
-                                machine.reset()  # restart so the user can attempt to connect again
-                    except:
-                        # TODO: handle this error
-                        print("need to handle me somehow")
+                            ip
+                        ):  # if we are connected to WiFi, restart the device so that we can connect to MQTT
+                            # notify the phone app that we are restarting
+                            char.notify(
+                                connection,
+                                b"Updated the credentials, restarting device...",
+                            )
+                            time.sleep(
+                                1
+                            )  # let the phone app recieve the message before disconnecting
+                            machine.reset()  # restart so that we can connect to WiFi
+                        else:  # if we are not connected to WiFi, notify the phone app that the credentials are incorrect
+                            char.notify(connection, b"wifiError")
+                            time.sleep(
+                                1
+                            )  # let the phone app recieve the message before disconnecting
+                            machine.reset()  # restart so the user can attempt to connect again
 
 
 def main():
@@ -113,4 +109,7 @@ def main():
     mqtt_run()  # startup MQTT client listening for messagses
 
 
-main()
+try:
+    main()
+except Exception as e:
+    machine.reset()
