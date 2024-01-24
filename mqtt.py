@@ -25,7 +25,7 @@ def mqtt_connect():
         client_id=get_mac(),  # the id of the client is the mac address
         server=aws_endpoint,
         port=8883,
-        keepalive=1200,
+        keepalive=120,
         ssl=True,
         ssl_params=ssl_params,
     )
