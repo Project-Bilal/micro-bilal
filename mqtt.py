@@ -6,7 +6,6 @@ import ujson as json
 from umqtt.robust import MQTTClient
 from utils import get_mac, led_toggle
 import cast
-import machine
 
 
 # create the mqtt connection and subscribe to the topic
@@ -77,8 +76,21 @@ def play(url, ip, port, vol):
 # this function is called from main.py and runs the mqtt client indefinitely
 def mqtt_run():
     mqtt = mqtt_connect()
+    keepalive_interval = 60  # Keepalive message interval in seconds
+    counter = 0
 
     while True:
         time.sleep(1)
         # Check for new messages
         mqtt.check_msg()
+
+        # Increment the counter
+        counter += 1
+
+        # Check if it's time to send the keepalive message
+        if counter >= keepalive_interval:
+            # Reset the counter
+            counter = 0
+
+            # Publish the keepalive message
+            mqtt.publish("keep_alive", "keep me alive please")
