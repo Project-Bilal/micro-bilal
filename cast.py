@@ -1,7 +1,7 @@
 # Description: This file contains the Chromecast class that handles connecting to the Chromecast and casting to it
 # When a message is sent to the ESP32 via MQTT, a Chromecast object is created
 import usocket as socket
-import ussl as ssl
+import ssl
 from ustruct import pack, unpack
 import ujson as json
 
@@ -97,7 +97,26 @@ class Chromecast(object):
             + calc_variant(len(payload))
             + payload
         )
-        self.s.write(pack(">I", len(msg)) + msg)
+
+        # need to try sending the message a few times
+        # if not connected for a while the first attempt will fail
+        # check the 3rd status for each attempt until successful
+        keep_trying = True
+        no_of_tries = 0
+        while keep_trying:
+            print("try number:", no_of_tries + 1)
+            self.s.write(pack(">I", len(msg)) + msg)
+            self.read_message()
+            self.read_message()
+            status = self.read_message()
+            if status.find(b'"type":"MEDIA_STATUS"') != -1:
+                if status.find(b'"status":[]') == -1:
+                    keep_trying = False
+                    print("success :)")
+
+            no_of_tries += 1
+            if no_of_tries > 2:
+                keep_trying = False
 
     def read_message(self):
         siz = unpack(">I", self.s.read(4))[0]
