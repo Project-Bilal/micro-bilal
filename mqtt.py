@@ -3,6 +3,7 @@
 
 import utime as time
 import ujson as json
+import ssl
 from umqtt.robust import MQTTClient
 from utils import get_mac, led_toggle
 import cast
@@ -14,19 +15,16 @@ def mqtt_connect():
     with open("connection.json", "r") as file:
         data = json.load(file)
         aws_endpoint = data["mqtt_host"]
-    with open("private.pem.key", "r") as f:
-        key = f.read()  # private key
-    with open("cert.pem.crt", "r") as f:
-        cert = f.read()  #  certificate file
-    ssl_params = {"key": key, "cert": cert, "server_side": False}
-
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.verify_mode = ssl.CERT_REQUIRED
+    context.load_verify_locations(cafile="root-CA.crt")
+    context.load_cert_chain("cert.pem.crt", "private.pem.key")
     mqtt = MQTTClient(
         client_id=get_mac(),  # the id of the client is the mac address
         server=aws_endpoint,
         port=8883,
         keepalive=120,
-        ssl=True,
-        ssl_params=ssl_params,
+        ssl=context,
     )
     mqtt.connect()
     mqtt.set_callback(sub_cb)  # when we get a message, call the sub_cb function

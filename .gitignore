@@ -2,3 +2,4 @@ connection.json
 private.pem.key
 cert.pem.crt
 root-CA.crt
+.DS_Store
