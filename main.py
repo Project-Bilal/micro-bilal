@@ -13,6 +13,7 @@ import ujson as json
 from utils import wifi_connect, led_on, get_aws_cert
 from mqtt import mqtt_run
 import machine
+import ntptime
 
 
 async def startup():
@@ -106,6 +107,7 @@ async def startup():
 def main():
     ip = asyncio.run(startup())  # connect to WiFi or advertise BLE
     get_aws_cert()  # downloads aws root-CA.crt if not here
+    ntptime.settime()  # sync time to make sure the cert is valid
     mqtt_run()  # startup MQTT client listening for messagses
 
 
