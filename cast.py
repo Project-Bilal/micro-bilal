@@ -104,7 +104,6 @@ class Chromecast(object):
         keep_trying = True
         no_of_tries = 0
         while keep_trying:
-            print("try number:", no_of_tries + 1)
             self.s.write(pack(">I", len(msg)) + msg)
             self.read_message()
             self.read_message()
@@ -112,7 +111,6 @@ class Chromecast(object):
             if status.find(b'"type":"MEDIA_STATUS"') != -1:
                 if status.find(b'"status":[]') == -1:
                     keep_trying = False
-                    print("success :)")
 
             no_of_tries += 1
             if no_of_tries > 2:
