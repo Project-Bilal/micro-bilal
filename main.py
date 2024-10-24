@@ -23,22 +23,15 @@ def main():
             mqtt_run()
         except Exception as e:
             print("MQTT failed, retrying:", e)
-            return
+            return  # Return to the main loop instead of propagating the error
     else:
         run_ble()
 
-
-error_count = 0
-max_errors = 3
 
 while True:
     try:
         main()
     except Exception as e:
-        print("An error occurred", e)
+        print("An error occured", e)
         led_off()
-        error_count += 1
-        if error_count > max_errors:
-            run_ble()  # Fall back to BLE instead of resetting again
-            break  # Exit the reset loop
         machine.reset()
