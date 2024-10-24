@@ -5,11 +5,7 @@ import utime as time
 import ujson as json
 import machine
 from machine import Pin
-import urequests
 import os
-
-CERT_URL = "https://www.amazontrust.com/repository/AmazonRootCA1.pem"
-CERT_FILE = "root-CA.crt"
 
 
 # toggle the LED for certain situations
@@ -36,6 +32,13 @@ def led_on():
     # TODO: update this to work with pico
     Pin(2, Pin.OUT).on()
 
+    # turn the LED on
+
+
+def led_off():
+    # TODO: update this to work with pico
+    Pin(2, Pin.OUT).off()
+
 
 # get mac address for mqtt connection
 def get_mac():  # TODO: update this to work with pico
@@ -46,42 +49,56 @@ def get_mac():  # TODO: update this to work with pico
 
 # connect to wifi and return ip
 def wifi_connect():
-    with open("connection.json", "r") as file:
-        data = json.load(file)
-        SSID = data.get("SSID")
-        PASS = data.get("PASSWORD")
-
-    # if the SSID or PASSWORD is not set, return None
-    if SSID is None or PASS is None:
-        return None
-
     network.hostname("Bilal Cast")
     wlan = network.WLAN(network.STA_IF)
     wlan.active(True)
     wlan.disconnect()
-    time.sleep(0.1)
-    wlan.connect(SSID, PASS)
-    timeout = 10  # Set a timeout (adjust as needed)
-    while not wlan.isconnected() and timeout > 0:
+    time.sleep(1)
+
+    with open("connection.json", "r") as file:
+        data = json.load(file)
+        SSID = data.get("SSID", None)
+        PASS = data.get("PASSWORD", None)
+
+    # Make sure we have both SSID and PASS
+    if SSID and PASS:
+        wlan.connect(SSID, PASS)
+        timeout = 10  # Set a timeout (adjust as needed)
+        while not wlan.isconnected() and timeout > 0:
+            time.sleep(1)
+            timeout -= 1
+
+        # if we conected return back with the ip
+        if wlan.isconnected():
+            led_toggle("wifi")
+            return wlan.ifconfig()[0]
+
+    # if connection does not succeed
+    return None
+
+
+# Scan for available wifi
+def wifi_scan():
+    try:
+        wlan = network.WLAN(network.STA_IF)
+        wlan.active(True)
+        wlan.disconnect()
         time.sleep(1)
-        timeout -= 1
+        networks = wlan.scan()
+        wifi_list = []
+        for wifi_network in networks:
+            ssid = wifi_network[0]  # Network name (SSID)
+            rssi = wifi_network[3]  # Signal strength (RSSI)
+            security = wifi_network[4]
+            if ssid and (security != 1):
+                wifi_list.append(
+                    (ssid, rssi, security)
+                )  # Append the SSID and RSSI to the list
 
-    if not wlan.isconnected():
-        return None  # Return None to indicate failed Wi-Fi connection
+        # Sort networks by signal strength (RSSI) in descending order
+        wifi_list_sorted = sorted(wifi_list, key=lambda x: x[1], reverse=True)
 
-    led_toggle("wifi")
-    return wlan.ifconfig()[0]
-
-
-def get_aws_cert():
-    # skip if file is there
-    if CERT_FILE in os.listdir():
-        return
-
-    response = urequests.get(CERT_URL)
-
-    if response.status_code == 200:
-        with open(CERT_FILE, "wb") as file:
-            file.write(response.content)
-
-    response.close()
+        # return list of wifi networks with their names and security
+    except Exception as e:
+        print("An error occurred:", e)
+    return wifi_list_sorted
