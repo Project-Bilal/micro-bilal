@@ -4,6 +4,8 @@ from ble import run_ble
 from mqtt import mqtt_run
 import machine
 import gc
+import time
+import asyncio
 
 
 def startup():
@@ -25,12 +27,13 @@ def main():
             print("MQTT failed, retrying:", e)
             return  # Return to the main loop instead of propagating the error
     else:
-        run_ble()
+        asyncio.run(run_ble())
 
 
 while True:
     try:
         main()
+        time.sleep(1)
     except Exception as e:
         print("An error occured", e)
         led_off()
