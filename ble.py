@@ -63,6 +63,7 @@ async def control_task(connection, char):
                     await asyncio.sleep(0.5)  # need this or esp32 may crash
                     msg = b'{"HEADER":"network_written", "MESSAGE":"success"}'
                     char.notify(connection, msg)
+                    await asyncio.sleep(2)
                     machine.reset()
 
     except Exception as e:
@@ -71,6 +72,7 @@ async def control_task(connection, char):
 
 
 async def run_ble():
+    print("here")
     while True:
         SERVICE_UUID, CHAR_UUID = get_UUIDs()
 
