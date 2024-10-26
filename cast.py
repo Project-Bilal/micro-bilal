@@ -118,4 +118,3 @@ class Chromecast(object):
 
     def disconnect(self):
         self.s.close()
-
