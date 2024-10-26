@@ -1,87 +1,70 @@
-import utime as time
-import ujson as json
-import ssl
 from umqtt.robust import MQTTClient
-from utils import get_mac, led_toggle
+from utils import led_toggle
 import cast
-import gc
-import ntptime
+import utime as time
+import json
 
-PING_INTERVAL = const(60)  # Define as constant
+PING_INTERVAL = const(60)
+KEEPALIVE = const(120)
+MQTT_HOST = "ec2-3-80-146-227.compute-1.amazonaws.com"
+MQTT_PORT = const(1883)
 
+class MQTTHandler(object):
+    def __init__(self, id):
+        self.mqtt = None
+        self.id = id
+        self.connected = False
+    
+    def mqtt_connect(self):
+        self.mqtt = MQTTClient(
+        client_id=self.id,
+        server=MQTT_HOST,
+        port=MQTT_PORT,
+        keepalive=KEEPALIVE
+        )
+        
+        self.mqtt.connect()
+        self.mqtt.set_callback(self.sub_cb)
+        self.mqtt.subscribe(self.id)
+        self.connected = True
+        led_toggle("mqtt")
+        return True
+        
+    def sub_cb(self, topic, msg):
+        msg = json.loads(msg)
+        led_toggle("mqtt")
+        
+        action = msg.get("action")
+        props = msg.get("props", {})
+        
+        if action == "play":
+            url = props.get("url")
+            ip = props.get("ip")
+            port = props.get("port")
+            volume = props.get("volume")
+            
+            if all([url, ip, port, volume]):
+                self.play(url=url, ip=ip, port=port, vol=volume)
+    
+    def play(self, url, ip, port, vol):
+        # Handle volume
+        device = cast.Chromecast(ip, port)
+        device.set_volume(vol)
+        device.disconnect()
+        
+        # Handle casting
+        device = cast.Chromecast(ip, port)
+        device.play_url(url)
+        device.disconnect()
+    
+    def mqtt_run(self):
+        counter = 0
+        while True:
+            time.sleep(1)
+            self.mqtt.check_msg()
+            
+            counter += 1
+            if counter >= PING_INTERVAL:
+                counter = 0
+                self.mqtt.ping()
 
-def mqtt_connect():
-    ntptime.settime()
-
-    thing_name = get_mac()
-
-    # Get the endpoint
-    with open("connection.json", "r") as file:
-        data = json.load(file)
-        aws_endpoint = data["mqtt_host"]
-
-    # Create SSL context
-    ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    ssl_context.verify_mode = ssl.CERT_REQUIRED
-    ssl_context.load_verify_locations("root-CA.crt")
-    ssl_context.load_cert_chain("cert.pem.crt", "private.pem.key")
-
-    mqtt = MQTTClient(
-        client_id=thing_name,
-        server=aws_endpoint,
-        port=8883,
-        keepalive=120,
-        ssl=ssl_context,
-    )
-
-    gc.collect()
-    mqtt.connect()
-
-    mqtt.set_callback(sub_cb)
-    mqtt.subscribe(thing_name)
-    led_toggle("mqtt")
-    return mqtt
-
-
-def sub_cb(topic, msg):
-    msg = json.loads(msg)
-    led_toggle("mqtt")
-
-    action = msg.get("action")
-    props = msg.get("props")
-
-    if action and props and action == "play":
-        url = props.get("url")
-        ip = props.get("ip")
-        port = props.get("port")
-        volume = props.get("volume")
-
-        if all([url, ip, port, volume]):
-            play(url=url, ip=ip, port=port, vol=volume)
-
-
-def play(url, ip, port, vol):
-    # Handle volume
-    device = cast.Chromecast(ip, port)
-    device.set_volume(vol)
-    device.disconnect()
-
-    # Handle casting
-    device = cast.Chromecast(ip, port)
-    device.play_url(url)
-    device.disconnect()
-
-
-def mqtt_run():
-    gc.collect()  # Clear memory
-
-    mqtt = mqtt_connect()
-    counter = 0
-
-    while True:
-        time.sleep(1)
-        mqtt.check_msg()
-        counter += 1
-        if counter >= PING_INTERVAL:
-            counter = 0
-            mqtt.ping()  # Using ping for keepalive
