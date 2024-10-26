@@ -4,6 +4,7 @@ import usocket as socket
 import ssl
 from ustruct import pack, unpack
 import ujson as json
+import utime as time
 
 # TODO: update this to use S3 instead of Google Cloud Storage and new logo
 # thumbnail that shows up on Google Home with screen
@@ -76,7 +77,7 @@ class Chromecast(object):
                     "contentType": "audio/mp3",
                     # Metadata here is configurable if we wanted to change the title of the audio and the thumbnail, but only applies to Chromecasts with screens
                     "metadata": {
-                        "title": "Bilal Cast",
+                        "title": "bilal_cast",
                         "metadataType": 0,
                         "thumb": THUMB,
                         "images": [{"url": THUMB}],
@@ -97,24 +98,18 @@ class Chromecast(object):
             + calc_variant(len(payload))
             + payload
         )
-
+        
         # need to try sending the message a few times
         # if not connected for a while the first attempt will fail
         # check the 3rd status for each attempt until successful
-        keep_trying = True
-        no_of_tries = 0
-        while keep_trying:
+        for i in range(2):
             self.s.write(pack(">I", len(msg)) + msg)
-            self.read_message()
-            self.read_message()
-            status = self.read_message()
-            if status.find(b'"type":"MEDIA_STATUS"') != -1:
-                if status.find(b'"status":[]') == -1:
-                    keep_trying = False
-
-            no_of_tries += 1
-            if no_of_tries > 2:
-                keep_trying = False
+            for _ in range(4):
+                status = self.read_message()
+                if status.find(b'"title":"bilal_cast"') != -1:
+                    return True
+            
+        return False #if we arrive here the message didn't work
 
     def read_message(self):
         siz = unpack(">I", self.s.read(4))[0]
@@ -123,3 +118,4 @@ class Chromecast(object):
 
     def disconnect(self):
         self.s.close()
+
