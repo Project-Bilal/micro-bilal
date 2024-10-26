@@ -1,11 +1,9 @@
-import ujson as json
-from utils import wifi_connect, led_off
+from utils import wifi_connect, led_off, get_mac
 from ble import run_ble
-from mqtt import mqtt_run
 import machine
-import gc
-import time
+import utime as time
 import asyncio
+import mqtt
 
 
 def startup():
@@ -20,21 +18,22 @@ def startup():
 def main():
     wifi_success = startup()
     if wifi_success:
-        gc.collect()
-        try:
-            mqtt_run()
-        except Exception as e:
-            print("MQTT failed, retrying:", e)
-            return  # Return to the main loop instead of propagating the error
+        client = mqtt.MQTTHandler(get_mac())
+        conn = client.mqtt_connect()
+        if conn:
+            client.mqtt_run()
     else:
         asyncio.run(run_ble())
 
+try:
+    main()
+except Exception as e:
+    time.sleep(1)
+    led_off()
+    machine.reset()
+finally:
+    time.sleep(1)
+    led_off()
+    machine.reset()
+    
 
-while True:
-    try:
-        main()
-        time.sleep(1)
-    except Exception as e:
-        print("An error occured", e)
-        led_off()
-        machine.reset()
