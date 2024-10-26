@@ -31,10 +31,8 @@ def led_toggle(info=None):
 def led_on():
     # TODO: update this to work with pico
     Pin(2, Pin.OUT).on()
-
+    
     # turn the LED on
-
-
 def led_off():
     # TODO: update this to work with pico
     Pin(2, Pin.OUT).off()
@@ -54,11 +52,12 @@ def wifi_connect():
     wlan.active(True)
     wlan.disconnect()
     time.sleep(1)
-
+    
     with open("connection.json", "r") as file:
         data = json.load(file)
         SSID = data.get("SSID", None)
         PASS = data.get("PASSWORD", None)
+    
 
     # Make sure we have both SSID and PASS
     if SSID and PASS:
@@ -67,12 +66,12 @@ def wifi_connect():
         while not wlan.isconnected() and timeout > 0:
             time.sleep(1)
             timeout -= 1
-
+            
         # if we conected return back with the ip
         if wlan.isconnected():
             led_toggle("wifi")
             return wlan.ifconfig()[0]
-
+    
     # if connection does not succeed
     return None
 
@@ -91,9 +90,7 @@ def wifi_scan():
             rssi = wifi_network[3]  # Signal strength (RSSI)
             security = wifi_network[4]
             if ssid and (security != 1):
-                wifi_list.append(
-                    (ssid, rssi, security)
-                )  # Append the SSID and RSSI to the list
+                wifi_list.append((ssid, rssi, security))  # Append the SSID and RSSI to the list
 
         # Sort networks by signal strength (RSSI) in descending order
         wifi_list_sorted = sorted(wifi_list, key=lambda x: x[1], reverse=True)
