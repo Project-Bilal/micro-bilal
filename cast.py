@@ -77,7 +77,7 @@ class Chromecast(object):
                     "contentType": "audio/mp3",
                     # Metadata here is configurable if we wanted to change the title of the audio and the thumbnail, but only applies to Chromecasts with screens
                     "metadata": {
-                        "title": "bilal_cast",
+                        "title": "Bilal Cast",
                         "metadataType": 0,
                         "thumb": THUMB,
                         "images": [{"url": THUMB}],
@@ -106,7 +106,7 @@ class Chromecast(object):
             self.s.write(pack(">I", len(msg)) + msg)
             for _ in range(4):
                 status = self.read_message()
-                if status.find(b'"title":"bilal_cast"') != -1:
+                if status.find(b'"title":"Bilal Cast"') != -1:
                     return True
             
         return False #if we arrive here the message didn't work
