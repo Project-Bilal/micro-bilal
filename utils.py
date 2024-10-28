@@ -53,17 +53,21 @@ def wifi_connect():
     wlan.disconnect()
     time.sleep(1)
     
-    with open("connection.json", "r") as file:
-        data = json.load(file)
-        SSID = data.get("SSID", None)
-        PASS = data.get("PASSWORD", None)
-    
+    try:
+        with open("wifi.json", "r") as file:
+            data = json.load(file)
+            SSID = data.get("SSID", None)
+            PASS = data.get("PASSWORD", None)
+    except:
+        # if file doesn't exit or something fails
+        return None
 
     # Make sure we have both SSID and PASS
     if SSID and PASS:
         wlan.connect(SSID, PASS)
         timeout = 10  # Set a timeout (adjust as needed)
         while not wlan.isconnected() and timeout > 0:
+            print("connecting to WiFi...")
             time.sleep(1)
             timeout -= 1
             
@@ -99,3 +103,4 @@ def wifi_scan():
     except Exception as e:
         print("An error occurred:", e)
     return wifi_list_sorted
+   
