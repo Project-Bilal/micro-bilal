@@ -31,9 +31,3 @@ except Exception as e:
     time.sleep(1)
     led_off()
     machine.reset()
-finally:
-    time.sleep(1)
-    led_off()
-    machine.reset()
-    
-
