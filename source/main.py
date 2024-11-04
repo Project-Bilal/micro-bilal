@@ -12,7 +12,7 @@ def startup():
     if ip:
         print("connected: ", ip)
         return True
-    print("failed to connect")
+    print("no WiFi connection")
     return False
 
 
@@ -24,6 +24,7 @@ def main():
         if conn:
             client.mqtt_run()
     else:
+        print("Starting bluetooth advertising...")
         asyncio.run(run_ble())
 
 try:
