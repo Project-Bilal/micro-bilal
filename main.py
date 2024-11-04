@@ -1,4 +1,4 @@
-from utils import wifi_connect, led_off, get_mac
+from utils import wifi_connect, led_toggle, get_mac
 from ble import run_ble
 import machine
 import utime as time
@@ -7,11 +7,12 @@ import mqtt
 
 
 def startup():
-    led_off()
+    led_toggle()
     ip = wifi_connect()
     if ip:
         print("connected: ", ip)
         return True
+    print("failed to connect")
     return False
 
 
@@ -29,5 +30,4 @@ try:
     main()
 except Exception as e:
     time.sleep(1)
-    led_off()
     machine.reset()
