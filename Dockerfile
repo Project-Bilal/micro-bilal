@@ -74,8 +74,9 @@ RUN cd /data \
     && cp -r micropython-lib/micropython/bluetooth/aioble/aioble/* aioble/ \
     && rm -rf micropython-lib
 
-# Copy your application files
-COPY --chmod=644 main.py utils.py mqtt.py cast.py ble.py ${MICROPYTHON}/ports/esp32/modules/
+# Copy application files from source and ota directories
+COPY --chmod=644 source/ ${MICROPYTHON}/ports/esp32/modules/
+COPY --chmod=644 ota/ ${MICROPYTHON}/ports/esp32/modules/ota/
 
 # Set working directory for build
 WORKDIR ${MICROPYTHON}/ports/esp32
