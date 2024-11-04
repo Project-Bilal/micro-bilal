@@ -3,11 +3,12 @@ from utils import led_toggle
 import cast
 import utime as time
 import json
+from micropython import const
 
-PING_INTERVAL = const(60)
-KEEPALIVE = const(120)
-MQTT_HOST = "ec2-3-80-146-227.compute-1.amazonaws.com"
-MQTT_PORT = const(1883)
+_PING_INTERVAL = const(60)
+_KEEPALIVE = const(120)
+_MQTT_HOST = const("ec2-3-80-146-227.compute-1.amazonaws.com")
+_MQTT_PORT = const(1883)
 
 class MQTTHandler(object):
     def __init__(self, id):
@@ -18,9 +19,9 @@ class MQTTHandler(object):
     def mqtt_connect(self):
         self.mqtt = MQTTClient(
         client_id=self.id,
-        server=MQTT_HOST,
-        port=MQTT_PORT,
-        keepalive=KEEPALIVE
+        server=_MQTT_HOST,
+        port=_MQTT_PORT,
+        keepalive=_KEEPALIVE
         )
         
         self.mqtt.connect()
@@ -58,13 +59,13 @@ class MQTTHandler(object):
         device.disconnect()
     
     def mqtt_run(self):
+        print("Connected and listening to MQTT Broker")
         counter = 0
         while True:
             time.sleep(1)
             self.mqtt.check_msg()
             
             counter += 1
-            if counter >= PING_INTERVAL:
+            if counter >= _PING_INTERVAL:
                 counter = 0
                 self.mqtt.ping()
-
