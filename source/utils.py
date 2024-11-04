@@ -6,36 +6,36 @@ import ujson as json
 import machine
 from machine import Pin
 import os
+from micropython import const
+import esp32
 
+_BUFFER_SIZE = const(128)  # Make this big enough for your data
+_NVS_NAME = const("wifi_creds")  # NVS namespace
 
-# toggle the LED for certain situations
+_WIFI_TIMEOUT = const(10)  # WiFi connection timeout in seconds
+
+_LED_PIN = const(2)  # For the ESP32 built-in LED
+_BLINK_DELAY = const(0.25)  # Blink delay in seconds
+_BLINK_COUNT = {
+    "wifi": const(6),
+    "mqtt": const(4),
+    "default": const(8)
+}
+_LED = Pin(_LED_PIN, Pin.OUT)  # Create single LED instance
+
 def led_toggle(info=None):
-    # TODO: update this to work with pico
-    LED = Pin(2, Pin.OUT)
+    # Use _LED instead of creating new instance
+    blinks = _BLINK_COUNT.get(info, _BLINK_COUNT["default"])
+    for x in range(blinks):
+        _LED.value(not _LED.value())
+        time.sleep(_BLINK_DELAY)
+    _LED.off()
 
-    if not info:
-        i = 8
-    elif info == "wifi":
-        i = 6
-    elif info == "mqtt":
-        i = 4
-    else:
-        i = 8
-    for x in range(i):
-        LED.value(not LED.value())
-        time.sleep(0.25)
-    LED.off()
-
-
-# turn the LED on
 def led_on():
-    # TODO: update this to work with pico
-    Pin(2, Pin.OUT).on()
+    _LED.on()
     
-    # turn the LED on
 def led_off():
-    # TODO: update this to work with pico
-    Pin(2, Pin.OUT).off()
+    _LED.off()
 
 
 # get mac address for mqtt connection
@@ -52,22 +52,29 @@ def wifi_connect():
     wlan.active(True)
     wlan.disconnect()
     time.sleep(1)
+    nvs = esp32.NVS(_NVS_NAME)
+    buffer = bytearray(_BUFFER_SIZE)  # Create a buffer
     
     try:
-        with open("wifi.json", "r") as file:
-            data = json.load(file)
-            SSID = data.get("SSID", None)
-            PASS = data.get("PASSWORD", None)
+        length = nvs.get_blob("SSID", buffer)  # Get actual length of data
+        SSID = buffer[:length].decode()
+        length = nvs.get_blob("PASSWORD", buffer)  # Get actual length of data
+        PASS = buffer[:length].decode()
+        SECURITY = nvs.get_i32("SECURITY")
     except:
-        # if file doesn't exit or something fails
+        # if values do not exist return None
         return None
 
     # Make sure we have both SSID and PASS
-    if SSID and PASS:
-        wlan.connect(SSID, PASS)
-        timeout = 10  # Set a timeout (adjust as needed)
-        while not wlan.isconnected() and timeout > 0:
-            print("connecting to WiFi...")
+    if SSID and PASS and SECURITY:
+        # Connect to the WiFi network
+        if SECURITY == 0:
+            wlan.connect(SSID)
+        else:
+            wlan.connect(SSID, PASS)
+        timeout = _WIFI_TIMEOUT
+        print("connecting to WiFi...")
+        while not wlan.isconnected() and _WIFI_TIMEOUT > 0:
             time.sleep(1)
             timeout -= 1
             
@@ -79,6 +86,21 @@ def wifi_connect():
     # if connection does not succeed
     return None
 
+
+# save wifi credentials to nvs
+def set_wifi(SSID, SECURITY, PASSWORD=None):
+    try:
+        nvs = esp32.NVS(_NVS_NAME)
+        nvs.set_blob("SSID", SSID)
+        nvs.set_i32("SECURITY", SECURITY)
+        if PASSWORD:
+            nvs.set_blob("PASSWORD", PASSWORD)
+        else:
+            nvs.set_blob("PASSWORD", "nopassword")
+        nvs.commit()
+        return True
+    except:
+        return False
 
 # Scan for available wifi
 def wifi_scan():
@@ -103,4 +125,3 @@ def wifi_scan():
     except Exception as e:
         print("An error occurred:", e)
     return wifi_list_sorted
-   
