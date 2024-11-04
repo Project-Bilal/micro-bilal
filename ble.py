@@ -1,21 +1,25 @@
 import uasyncio as asyncio
 import aioble
 import ujson as json
-from utils import wifi_scan
+from utils import wifi_scan, led_on, led_toggle
 import machine
 import bluetooth
+from micropython import const
 
 # advertising interval in milliseconds
-_ADV_INTERVAL_MS = 250_000
+_ADV_INTERVAL_MS = const(250_000)
 
 # MTU size
-MTU_SIZE = 128
+_MTU_SIZE = const(128)
 
 # SERVICE_UUID is the UUID of the service that the phone app will look for
-SERVICE_UUID = bluetooth.UUID("2b45e4e0-af38-4c4a-a4dc-4399a03a7b38")
+_SERVICE_UUID = const("2b45e4e0-af38-4c4a-a4dc-4399a03a7b38")
 
 # CHAR_UUID is the UUID of the characteristic that the phone app will write to
-CHAR_UUID = bluetooth.UUID("97d91c3e-1122-48b8-8b6f-8ffb2daa2bda")
+_CHAR_UUID = const("97d91c3e-1122-48b8-8b6f-8ffb2daa2bda")
+
+SERVICE_UUID = bluetooth.UUID(_SERVICE_UUID)
+CHAR_UUID = bluetooth.UUID(_CHAR_UUID)
         
 async def control_task(connection, char):
     try:
@@ -67,14 +71,16 @@ async def run_ble():
         aioble.register_services(service)
 
         # Set MTU Size so we can send longer messages
-        aioble.core.ble.gatts_set_buffer(char._value_handle, MTU_SIZE)
+        aioble.core.ble.gatts_set_buffer(char._value_handle, _MTU_SIZE)
         
         print("Waiting for connection")
+        led_on()
         connection = await aioble.advertise(
             _ADV_INTERVAL_MS,
-            name="Bilal-Cast",
+            name="blebilal",
             services=[SERVICE_UUID],
         )
+        led_toggle()
         print("Connection from", connection.device)
 
         await control_task(connection, char)
