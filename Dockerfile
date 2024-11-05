@@ -74,6 +74,20 @@ RUN cd /data \
     && cp -r micropython-lib/micropython/bluetooth/aioble/aioble/* aioble/ \
     && rm -rf micropython-lib
 
+# Create custom partitions file
+RUN <<EOF
+cat > ${MICROPYTHON}/ports/esp32/partitions-ota.csv << 'EOL'
+# Name,   Type, SubType, Offset,   Size,     Flags
+nvs,      data, nvs,     0x9000,   0x4000,
+otadata,  data, ota,     0xd000,   0x2000,
+phy_init, data, phy,     0xf000,   0x1000,
+factory,  app,  factory, 0x10000,  0x1D0000,
+ota_0,    app,  ota_0,   0x1E0000, 0x1D0000,
+ota_1,    app,  ota_1,   0x3B0000, 0x1D0000,
+vfs,      data, fat,     0x580000, 0x80000,
+EOL
+EOF
+
 # Copy application files from source and ota directories
 COPY --chmod=644 source/ ${MICROPYTHON}/ports/esp32/modules/
 COPY --chmod=644 ota/ ${MICROPYTHON}/ports/esp32/modules/ota/
