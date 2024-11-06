@@ -1,6 +1,7 @@
 from utils import wifi_connect, led_toggle, get_mac
 from ble import run_ble
 import machine
+import ota.rollback
 import utime as time
 import asyncio
 import mqtt
@@ -22,6 +23,7 @@ def main():
         client = mqtt.MQTTHandler(get_mac())
         conn = client.mqtt_connect()
         if conn:
+            ota.rollback.cancel()
             client.mqtt_run()
     else:
         print("Starting bluetooth advertising...")

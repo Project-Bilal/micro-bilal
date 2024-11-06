@@ -4,6 +4,7 @@ import cast
 import utime as time
 import json
 from micropython import const
+import ota.update
 
 _PING_INTERVAL = const(60)
 _KEEPALIVE = const(120)
@@ -46,6 +47,11 @@ class MQTTHandler(object):
             
             if all([url, ip, port, volume]):
                 self.play(url=url, ip=ip, port=port, vol=volume)
+        
+        if action == "update":
+            url = props.get("url")
+            if url:
+                ota.update.from_file(url=url, reboot=True)
     
     def play(self, url, ip, port, vol):
         # Handle volume
