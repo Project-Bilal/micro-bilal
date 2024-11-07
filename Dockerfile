@@ -81,12 +81,25 @@ cat > ${MICROPYTHON}/ports/esp32/partitions-ota.csv << 'EOL'
 nvs,      data, nvs,     0x9000,   0x4000,
 otadata,  data, ota,     0xd000,   0x2000,
 phy_init, data, phy,     0xf000,   0x1000,
-factory,  app,  factory, 0x10000,  0x1D0000,
-ota_0,    app,  ota_0,   0x1E0000, 0x1D0000,
-ota_1,    app,  ota_1,   0x3B0000, 0x1D0000,
-vfs,      data, fat,     0x580000, 0x80000,
+ota_0,    app,  ota_0,   0x10000,  0x1C0000,
+ota_1,    app,  ota_1,   0x1D0000, 0x1C0000,
+vfs,      data, fat,     0x390000, 0x70000,
 EOL
 EOF
+
+# Configure partition table in multiple locations to ensure it's used
+RUN cd ${MICROPYTHON}/ports/esp32 && \
+    # Add to main sdkconfig.defaults
+    echo "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions-ota.csv\"" >> sdkconfig.defaults && \
+    echo "CONFIG_PARTITION_TABLE_CUSTOM=y" >> sdkconfig.defaults && \
+    # Add to board-specific config
+    echo "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions-ota.csv\"" >> boards/ESP32_GENERIC/sdkconfig.defaults && \
+    echo "CONFIG_PARTITION_TABLE_CUSTOM=y" >> boards/ESP32_GENERIC/sdkconfig.defaults && \
+    # Also add to OTA variant config if it exists
+    if [ -f boards/ESP32_GENERIC/sdkconfig.ota ]; then \
+        echo "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions-ota.csv\"" >> boards/ESP32_GENERIC/sdkconfig.ota && \
+        echo "CONFIG_PARTITION_TABLE_CUSTOM=y" >> boards/ESP32_GENERIC/sdkconfig.ota; \
+    fi
 
 # Copy application files from source and ota directories
 COPY --chmod=644 source/ ${MICROPYTHON}/ports/esp32/modules/
@@ -95,7 +108,7 @@ COPY --chmod=644 ota/ ${MICROPYTHON}/ports/esp32/modules/ota/
 # Set working directory for build
 WORKDIR ${MICROPYTHON}/ports/esp32
 
-# Create build script with hard-coded BOARD_VARIANT=OTA
+# Create build script with enhanced partition table handling
 RUN <<EOF cat > /entrypoint.sh
 #!/bin/bash
 set -eo pipefail
@@ -106,9 +119,8 @@ set -eo pipefail
 # Clean previous builds
 idf.py fullclean
 
-# Execute make with OTA variant and all additional parameters
-make BOARD=ESP32_GENERIC BOARD_VARIANT=OTA USER_C_MODULES= PYTHON=${IDF_PYTHON:-python3} ESPIDF= CMAKE_PRESETS=\${IDF_TARGET} "\$@"
-EOF
+# Execute make with OTA variant and explicit partition table
+PARTITION_TABLE_CSV=partitions-ota.csv make BOARD=ESP32_GENERIC BOARD_VARIANT=OTA USER_C_MODULES= PYTHON=${IDF_PYTHON:-python3} ESPIDF= "\$@"
 
 # Make entrypoint executable
 RUN chmod +x /entrypoint.sh
