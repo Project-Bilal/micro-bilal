@@ -121,8 +121,10 @@ idf.py fullclean
 
 # Execute make with OTA variant and explicit partition table
 PARTITION_TABLE_CSV=partitions-ota.csv make BOARD=ESP32_GENERIC BOARD_VARIANT=OTA USER_C_MODULES= PYTHON=${IDF_PYTHON:-python3} ESPIDF= "\$@"
+EOF
 
-# Make entrypoint executable
+# Make entrypoint executable as a separate RUN command
 RUN chmod +x /entrypoint.sh
 
+# Set the entrypoint as a separate instruction
 ENTRYPOINT ["/entrypoint.sh"]
