@@ -6,7 +6,6 @@ import machine
 import bluetooth
 from micropython import const
 import utime as time
-import ota.rollback
 
 # advertising interval in milliseconds
 _ADV_INTERVAL_MS = const(250_000)
@@ -82,7 +81,6 @@ async def run_ble():
             services=[_SERVICE_UUID],
         )
         led_toggle()
-        ota.rollback.cancel()
         print("Connection from", connection.device)
 
         await control_task(connection, char)
