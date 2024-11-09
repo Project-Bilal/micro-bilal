@@ -23,13 +23,13 @@ def main():
         client = mqtt.MQTTHandler(get_mac())
         conn = client.mqtt_connect()
         if conn:
-            ota.rollback.cancel()
             client.mqtt_run()
     else:
         print("Starting bluetooth advertising...")
         asyncio.run(run_ble())
 
 try:
+    ota.rollback.cancel()
     main()
 except Exception as e:
     time.sleep(1)
