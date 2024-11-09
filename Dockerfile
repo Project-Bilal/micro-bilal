@@ -87,19 +87,10 @@ vfs,      data, fat,     0x390000, 0x70000,
 EOL
 EOF
 
-# Configure partition table in multiple locations to ensure it's used
+# Configure partition table
 RUN cd ${MICROPYTHON}/ports/esp32 && \
-    # Add to main sdkconfig.defaults
-    echo "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions-ota.csv\"" >> sdkconfig.defaults && \
-    echo "CONFIG_PARTITION_TABLE_CUSTOM=y" >> sdkconfig.defaults && \
-    # Add to board-specific config
-    echo "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions-ota.csv\"" >> boards/ESP32_GENERIC/sdkconfig.defaults && \
-    echo "CONFIG_PARTITION_TABLE_CUSTOM=y" >> boards/ESP32_GENERIC/sdkconfig.defaults && \
-    # Also add to OTA variant config if it exists
-    if [ -f boards/ESP32_GENERIC/sdkconfig.ota ]; then \
-        echo "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions-ota.csv\"" >> boards/ESP32_GENERIC/sdkconfig.ota && \
-        echo "CONFIG_PARTITION_TABLE_CUSTOM=y" >> boards/ESP32_GENERIC/sdkconfig.ota; \
-    fi
+    echo "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions-ota.csv\"" >> boards/ESP32_GENERIC/sdkconfig.ota && \
+    echo "CONFIG_PARTITION_TABLE_CUSTOM=y" >> boards/ESP32_GENERIC/sdkconfig.ota
 
 # Copy application files from source and ota directories
 COPY --chmod=644 source/ ${MICROPYTHON}/ports/esp32/modules/
