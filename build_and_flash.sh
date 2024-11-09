@@ -31,6 +31,23 @@ docker run --platform linux/amd64 -v "$PWD/output:/data/micropython/ports/esp32/
     exit 1
 }
 
+# Create firmware directory if it doesn't exist
+if [ ! -d "firmware" ]; then
+    echo "Creating firmware directory..."
+    mkdir firmware
+fi
+
+# Copy firmware files
+echo "Copying firmware files..."
+cp output/firmware.bin firmware/firmware.bin || {
+    echo "Failed to copy firmware.bin"
+    exit 1
+}
+cp output/micropython.bin firmware/micropython.bin || {
+    echo "Failed to copy micropython.bin"
+    exit 1
+}
+
 # Ask user about flashing
 read -p "Do you want to erase and flash the binary to ESP32? (y/n): " flash_choice
 
