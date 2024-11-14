@@ -4,3 +4,4 @@ cert.pem.crt
 root-CA.crt
 .DS_Store
 output/
+flash.sh
