@@ -1,79 +1,123 @@
-import uasyncio as asyncio
-import aioble
-import ujson as json
-from utils import wifi_scan, led_on, led_toggle, set_wifi
-import machine
-import bluetooth
-from micropython import const
-import utime as time
+# Import required libraries
+import uasyncio as asyncio  # MicroPython's async IO implementation
+import aioble  # Asynchronous BLE library
+import ujson as json  # MicroPython's JSON implementation
+from utils import (
+    wifi_scan,
+    led_on,
+    led_toggle,
+    set_wifi,
+    get_mac,
+)  # Custom utility functions
+import machine  # Hardware control
+import bluetooth  # BLE functionality
+from micropython import const  # Constant definition
+import utime as time  # Time functions
 
-# advertising interval in milliseconds
+# Constants for BLE configuration
+# Long advertisement interval to conserve power
 _ADV_INTERVAL_MS = const(250_000)
 
-# MTU size
+# Maximum transmission unit size for BLE packets
 _MTU_SIZE = const(128)
 
-# SERVICE_UUID is the UUID of the service that the phone app will look for
+# UUID for the main BLE service - must match mobile app
 _SERVICE_UUID = bluetooth.UUID("2b45e4e0-af38-4c4a-a4dc-4399a03a7b38")
 
-# CHAR_UUID is the UUID of the characteristic that the phone app will write to
+# UUID for the characteristic handling WiFi configuration
 _CHAR_UUID = bluetooth.UUID("97d91c3e-1122-48b8-8b6f-8ffb2daa2bda")
-        
+
+# UUID for the characteristic providing device MAC address
+_MAC_UUID = bluetooth.UUID("97d91c3f-1122-48b8-8b6f-8ffb2daa2bda")
+
+
 async def control_task(connection, char):
+    """
+    Handles BLE communication and WiFi configuration requests.
+    Processes incoming messages and sends appropriate responses.
+
+    Args:
+        connection: BLE connection object
+        char: BLE characteristic for communication
+    """
     try:
-        with connection.timeout(None):
+        with connection.timeout(None):  # No timeout for connection
             while True:
+                # Wait for data to be written to characteristic
                 await char.written()
+                # Read and parse incoming message
                 msg = char.read().decode()
                 msg = json.loads(msg)
                 header = msg.get("HEADER")
-                
-                
+
+                # Handle WiFi scanning request
                 if header == "wifiList":
-                    ssid_list = wifi_scan()
+                    ssid_list = wifi_scan()  # Scan for available networks
+                    # Send start notification
                     msg = b'{"HEADER":"wifiList", "MESSAGE":"start"}'
-                    time.sleep(.5) # need this or esp32 may crash
+                    time.sleep(0.5)  # Prevent ESP32 crashes
                     char.notify(connection, msg)
+
+                    # Send each found network's details
                     for ssid in ssid_list:
-                        msg = {"HEADER":"wifiList", "MESSAGE":"ssid", "SSID":ssid[0], "SECURITY":ssid[2]}
-                        msg = json.dumps(msg).encode('utf-8')
-                        char.notify(connection, msg
-                        )
-                        time.sleep(0.1)
+                        msg = {
+                            "HEADER": "wifiList",
+                            "MESSAGE": "ssid",
+                            "SSID": ssid[0],
+                            "SECURITY": ssid[2],
+                        }
+                        msg = json.dumps(msg).encode("utf-8")
+                        char.notify(connection, msg)
+                        time.sleep(0.1)  # Brief delay between messages
+
+                    # Send end notification
                     msg = b'{"HEADER":"wifiList", "MESSAGE":"end"}'
-                    time.sleep(.5) # need this or esp32 may crash
+                    time.sleep(0.5)  # Prevent ESP32 crashes
                     char.notify(connection, msg)
-                    
-                    
+
+                # Handle WiFi credentials configuration
                 if header == "shareWifi":
                     data = msg.get("MESSAGE")
                     SSID = data.get("SSID")
                     PASSWORD = data.get("PASSWORD")
                     SECURITY = data.get("SECURITY")
+                    # Save WiFi configuration
                     set_wifi(SSID, SECURITY, PASSWORD)
-                    time.sleep(0.5) # need this or esp32 may crash
+                    time.sleep(0.5)  # Prevent ESP32 crashes
+                    # Confirm successful configuration
                     msg = b'{"HEADER":"network_written", "MESSAGE":"success"}'
                     char.notify(connection, msg)
                     time.sleep(2)
-                    machine.reset()
-                    
-                    
+                    machine.reset()  # Restart device to apply new WiFi settings
+
     except Exception as e:
         print("An error occurred:", e)
     return
 
-async def run_ble():
-    while True:      
-        service = aioble.Service(_SERVICE_UUID)
-        char = aioble.Characteristic(service, _CHAR_UUID, read=True, write=True, notify=True)
 
-        # Register the service
+async def run_ble():
+    """
+    Main BLE service loop. Sets up the service, characteristics,
+    and handles client connections.
+    """
+    while True:
+        # Create BLE service and characteristics
+        service = aioble.Service(_SERVICE_UUID)
+        char = aioble.Characteristic(
+            service, _CHAR_UUID, read=True, write=True, notify=True
+        )
+        mac_char = aioble.Characteristic(service, _MAC_UUID, read=True)
+        # Set device MAC address
+        mac_char.write(get_mac().encode())
+
+        # Initialize BLE service
         aioble.register_services(service)
 
-        # Set MTU Size so we can send longer messages
+        # Configure MTU size for larger messages
         aioble.core.ble.gatts_set_buffer(char._value_handle, _MTU_SIZE)
-        
         print("Waiting for client to connect")
+
+        # Visual indicator for advertising state
         led_on()
         connection = await aioble.advertise(
             _ADV_INTERVAL_MS,
@@ -83,6 +127,8 @@ async def run_ble():
         led_toggle()
         print("Connection from", connection.device)
 
+        # Handle client communication
         await control_task(connection, char)
 
+        # Wait for disconnection before restarting advertising
         await connection.disconnected()
