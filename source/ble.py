@@ -70,11 +70,6 @@ async def control_task(connection, char):
                         char.notify(connection, msg)
                         time.sleep(0.1)  # Brief delay between messages
 
-                    # Send end notification
-                    msg = b'{"HEADER":"wifiList", "MESSAGE":"end"}'
-                    time.sleep(0.5)  # Prevent ESP32 crashes
-                    char.notify(connection, msg)
-
                 # Handle WiFi credentials configuration
                 if header == "shareWifi":
                     data = msg.get("MESSAGE")
