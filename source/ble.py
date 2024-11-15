@@ -8,6 +8,7 @@ from utils import (
     led_toggle,
     set_wifi,
     get_mac,
+    wifi_connect,
 )  # Custom utility functions
 import machine  # Hardware control
 import bluetooth  # BLE functionality
@@ -79,11 +80,20 @@ async def control_task(connection, char):
                     # Save WiFi configuration
                     set_wifi(SSID, SECURITY, PASSWORD)
                     time.sleep(0.5)  # Prevent ESP32 crashes
+                    ip = wifi_connect()
                     # Confirm successful configuration
-                    msg = b'{"HEADER":"network_written", "MESSAGE":"success"}'
+                    # then reset device
+                    if ip:
+                        msg = b'{"HEADER":"network_written", "MESSAGE":"success"}'
+                        char.notify(connection, msg)
+                        time.sleep(2)
+                        machine.reset()  # Restart device to apply new WiFi settings
+                        print("no WiFi connection")
+                    # Inform client of failed configuration
+                    # and wait before next attempt
+                    msg = b'{"HEADER":"network_written", "MESSAGE":"fail"}'
                     char.notify(connection, msg)
                     time.sleep(2)
-                    machine.reset()  # Restart device to apply new WiFi settings
 
     except Exception as e:
         print("An error occurred:", e)
