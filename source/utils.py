@@ -16,12 +16,9 @@ _WIFI_TIMEOUT = const(10)  # WiFi connection timeout in seconds
 
 _LED_PIN = const(2)  # For the ESP32 built-in LED
 _BLINK_DELAY = const(0.25)  # Blink delay in seconds
-_BLINK_COUNT = {
-    "wifi": const(6),
-    "mqtt": const(4),
-    "default": const(8)
-}
+_BLINK_COUNT = {"wifi": const(6), "mqtt": const(4), "default": const(8)}
 _LED = Pin(_LED_PIN, Pin.OUT)  # Create single LED instance
+
 
 def led_toggle(info=None):
     # Use _LED instead of creating new instance
@@ -31,9 +28,11 @@ def led_toggle(info=None):
         time.sleep(_BLINK_DELAY)
     _LED.off()
 
+
 def led_on():
     _LED.on()
-    
+
+
 def led_off():
     _LED.off()
 
@@ -54,7 +53,7 @@ def wifi_connect():
     time.sleep(1)
     nvs = esp32.NVS(_NVS_NAME)
     buffer = bytearray(_BUFFER_SIZE)  # Create a buffer
-    
+
     try:
         length = nvs.get_blob("SSID", buffer)  # Get actual length of data
         SSID = buffer[:length].decode()
@@ -74,15 +73,15 @@ def wifi_connect():
             wlan.connect(SSID, PASS)
         timeout = _WIFI_TIMEOUT
         print("connecting to WiFi...")
-        while not wlan.isconnected() and _WIFI_TIMEOUT > 0:
+        while not wlan.isconnected() and timeout > 0:
             time.sleep(1)
             timeout -= 1
-            
+
         # if we conected return back with the ip
         if wlan.isconnected():
             led_toggle("wifi")
             return wlan.ifconfig()[0]
-    
+
     # if connection does not succeed
     return None
 
@@ -102,6 +101,7 @@ def set_wifi(SSID, SECURITY, PASSWORD=None):
     except:
         return False
 
+
 # Scan for available wifi
 def wifi_scan():
     try:
@@ -116,7 +116,9 @@ def wifi_scan():
             rssi = wifi_network[3]  # Signal strength (RSSI)
             security = wifi_network[4]
             if ssid and (security != 1):
-                wifi_list.append((ssid, rssi, security))  # Append the SSID and RSSI to the list
+                wifi_list.append(
+                    (ssid, rssi, security)
+                )  # Append the SSID and RSSI to the list
 
         # Sort networks by signal strength (RSSI) in descending order
         wifi_list_sorted = sorted(wifi_list, key=lambda x: x[1], reverse=True)

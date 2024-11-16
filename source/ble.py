@@ -88,9 +88,9 @@ async def control_task(connection, char):
                         char.notify(connection, msg)
                         time.sleep(2)
                         machine.reset()  # Restart device to apply new WiFi settings
-                        print("no WiFi connection")
                     # Inform client of failed configuration
                     # and wait before next attempt
+                    print("Failed to connect to WiFi")
                     msg = b'{"HEADER":"network_written", "MESSAGE":"fail"}'
                     char.notify(connection, msg)
                     time.sleep(2)
