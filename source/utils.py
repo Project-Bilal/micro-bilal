@@ -2,12 +2,12 @@
 
 import network
 import utime as time
-import ujson as json
 import machine
 from machine import Pin
-import os
 from micropython import const
 import esp32
+from mdns_client import Client
+from mdns_client.service_discovery.txt_discovery import TXTServiceDiscovery
 
 _BUFFER_SIZE = const(128)  # Make this big enough for your data
 _NVS_NAME = const("wifi_creds")  # NVS namespace
@@ -127,3 +127,24 @@ def wifi_scan():
     except Exception as e:
         print("An error occurred:", e)
     return wifi_list_sorted
+
+
+# Scan for chromecast devices
+async def device_scan():
+    wlan = network.WLAN(network.STA_IF)
+    ip = wlan.ifconfig()[0]
+    client = Client(ip)
+    discovery = TXTServiceDiscovery(client)
+
+    # Do one-time query for Chromecasts
+    devices = []
+    results = await discovery.query_once("_googlecast", "_tcp", timeout=5.0)
+    for device in results:
+        devices.append(
+            {
+                "name": device.txt_records["fn"][0],
+                "ip": device.ips.pop(),
+                "port": device.port,
+            }
+        )
+    return devices
