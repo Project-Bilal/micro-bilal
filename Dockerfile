@@ -114,10 +114,13 @@ vfs,      data, fat,     0x390000, 0x70000,
 EOL
 EOF
 
-# Configure the custom partition table in the OTA-specific config
+# Configure the custom partition table and enable mDNS in the OTA-specific config
 RUN cd ${MICROPYTHON}/ports/esp32 && \
     echo "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions-ota.csv\"" >> boards/ESP32_GENERIC/sdkconfig.ota && \
-    echo "CONFIG_PARTITION_TABLE_CUSTOM=y" >> boards/ESP32_GENERIC/sdkconfig.ota
+    echo "CONFIG_PARTITION_TABLE_CUSTOM=y" >> boards/ESP32_GENERIC/sdkconfig.ota && \
+    echo "CONFIG_MDNS_MAX_SERVICES=10" >> boards/ESP32_GENERIC/sdkconfig.ota && \
+    echo "CONFIG_MDNS_SERVICE_ADD_TIMEOUT_MS=2000" >> boards/ESP32_GENERIC/sdkconfig.ota && \
+    echo "CONFIG_MDNS_NETWORKING_SOCKET=y" >> boards/ESP32_GENERIC/sdkconfig.ota
 
 # Copy application source files into the MicroPython modules directory
 # chmod 644 ensures files are readable but not executable
