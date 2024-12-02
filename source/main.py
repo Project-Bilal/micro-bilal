@@ -3,7 +3,7 @@ from ble import run_ble
 import machine
 import ota.rollback
 import utime as time
-import asyncio
+import uasyncio as asyncio
 import mqtt
 
 
@@ -27,6 +27,7 @@ def main():
     else:
         print("Starting bluetooth advertising...")
         asyncio.run(run_ble())
+
 
 try:
     ota.rollback.cancel()
