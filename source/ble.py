@@ -9,6 +9,7 @@ from utils import (
     set_wifi,
     get_mac,
     wifi_connect,
+    device_scan,
 )  # Custom utility functions
 import machine  # Hardware control
 import bluetooth  # BLE functionality
@@ -94,6 +95,23 @@ async def control_task(connection, char):
                     msg = b'{"HEADER":"network_written", "MESSAGE":"fail"}'
                     char.notify(connection, msg)
                     time.sleep(2)
+
+                # Handle chromecast devices request
+                if header == "chromecast":
+                    loop = asyncio.get_event_loop()
+                    devices = loop.run_until_complete(device_scan())
+                    # send devices to client
+                    for device in devices:
+                        msg = {
+                            "HEADER": "deviceslist",
+                            "MESSAGE": "chromecast",
+                            "NAME": device.get("NAME"),
+                            "IP": device.get("IP"),
+                            "PORT": device.get("PORT"),
+                        }
+                        msg = json.dumps(msg).encode("utf-8")
+                        char.notify(connection, msg)
+                        time.sleep(0.1)  # Brief delay between messages
 
     except Exception as e:
         print("An error occurred:", e)
