@@ -44,36 +44,36 @@ class MQTTHandler(object):
             print(f"Message not for process: {msg} (JSON parse error: {e})")
             return
 
-            if action == "play":
-                url = props.get("url")
-                ip = props.get("ip")
-                port = props.get("port")
-                volume = props.get("volume")
+        if action == "play":
+            url = props.get("url")
+            ip = props.get("ip")
+            port = props.get("port")
+            volume = props.get("volume")
 
-                if all([url, ip, port, volume]):
-                    self.play(url=url, ip=ip, port=port, vol=volume)
+            if all([url, ip, port, volume]):
+                self.play(url=url, ip=ip, port=port, vol=volume)
 
-            if action == "update":
-                url = props.get("url")
-                if url:
-                    ota.update.from_file(url=url, reboot=True)
+        if action == "update":
+            url = props.get("url")
+            if url:
+                ota.update.from_file(url=url, reboot=True)
 
-            if action == "ble":
-                asyncio.run(run_ble())
+        if action == "ble":
+            asyncio.run(run_ble())
 
-            if action == "discover":
-                # Import device_scan here to avoid circular imports
+        if action == "discover":
+            # Import device_scan here to avoid circular imports
 
-                try:
-                    # Run device scan asynchronously
-                    devices = asyncio.run(device_scan())
-                    message = {"chromecasts": devices}
-                    self.mqtt.publish(topic, json.dumps(message))
-                    print(f"Discovery completed, found {len(devices)} devices")
-                except Exception as e:
-                    error_response = {"error": str(e)}
-                    self.mqtt.publish(topic, json.dumps(error_response))
-                    print(f"Discovery failed: {e}")
+            try:
+                # Run device scan asynchronously
+                devices = asyncio.run(device_scan())
+                message = {"chromecasts": devices}
+                self.mqtt.publish(topic, json.dumps(message))
+                print(f"Discovery completed, found {len(devices)} devices")
+            except Exception as e:
+                error_response = {"error": str(e)}
+                self.mqtt.publish(topic, json.dumps(error_response))
+                print(f"Discovery failed: {e}")
 
     def play(self, url, ip, port, vol):
         # Handle volume
