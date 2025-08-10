@@ -1,5 +1,5 @@
 from umqtt.robust import MQTTClient
-from utils import led_toggle
+from utils import led_toggle, device_scan
 import cast
 import utime as time
 import json
@@ -56,18 +56,14 @@ class MQTTHandler(object):
 
         if action == "ble":
             asyncio.run(run_ble())
-            
+
         if action == "discover":
             # Import device_scan here to avoid circular imports
-            from utils import device_scan
-            import uasyncio as asyncio
-            
+
             try:
                 # Run device scan asynchronously
                 devices = asyncio.run(device_scan())
-                # Publish results to projectbilal/channel
-                response = {"action": "discover_response", "devices": devices}
-                self.mqtt.publish("projectbilal/channel", json.dumps(response))
+                self.mqtt.publish("projectbilal/channel", json.dumps(devices))
                 print(f"Discovery completed, found {len(devices)} devices")
             except Exception as e:
                 error_response = {"action": "discover_response", "error": str(e)}
