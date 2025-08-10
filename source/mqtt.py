@@ -56,6 +56,23 @@ class MQTTHandler(object):
 
         if action == "ble":
             asyncio.run(run_ble())
+            
+        if action == "discover":
+            # Import device_scan here to avoid circular imports
+            from utils import device_scan
+            import uasyncio as asyncio
+            
+            try:
+                # Run device scan asynchronously
+                devices = asyncio.run(device_scan())
+                # Publish results to projectbilal/channel
+                response = {"action": "discover_response", "devices": devices}
+                self.mqtt.publish("projectbilal/channel", json.dumps(response))
+                print(f"Discovery completed, found {len(devices)} devices")
+            except Exception as e:
+                error_response = {"action": "discover_response", "error": str(e)}
+                self.mqtt.publish("projectbilal/channel", json.dumps(error_response))
+                print(f"Discovery failed: {e}")
 
     def play(self, url, ip, port, vol):
         # Handle volume

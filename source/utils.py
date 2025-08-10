@@ -8,6 +8,7 @@ from micropython import const
 import esp32
 from umqtt.robust import MQTTClient
 from mdns_client.service_discovery.txt_discovery import TXTServiceDiscovery
+from mdns_client.client import Client
 
 _BUFFER_SIZE = const(128)  # Make this big enough for your data
 _NVS_NAME = const("wifi_creds")  # NVS namespace
