@@ -34,41 +34,46 @@ class MQTTHandler(object):
         return True
 
     def sub_cb(self, topic, msg):
-        msg = json.loads(msg)
-        led_toggle("mqtt")
+        try:
+            msg = json.loads(msg)
+            led_toggle("mqtt")
 
-        action = msg.get("action", {})
-        props = msg.get("props", {})
+            action = msg.get("action", {})
+            props = msg.get("props", {})
+        except (ValueError, TypeError) as e:
+            print(f"Message not for process: {msg} (JSON parse error: {e})")
+            return
 
-        if action == "play":
-            url = props.get("url")
-            ip = props.get("ip")
-            port = props.get("port")
-            volume = props.get("volume")
+            if action == "play":
+                url = props.get("url")
+                ip = props.get("ip")
+                port = props.get("port")
+                volume = props.get("volume")
 
-            if all([url, ip, port, volume]):
-                self.play(url=url, ip=ip, port=port, vol=volume)
+                if all([url, ip, port, volume]):
+                    self.play(url=url, ip=ip, port=port, vol=volume)
 
-        if action == "update":
-            url = props.get("url")
-            if url:
-                ota.update.from_file(url=url, reboot=True)
+            if action == "update":
+                url = props.get("url")
+                if url:
+                    ota.update.from_file(url=url, reboot=True)
 
-        if action == "ble":
-            asyncio.run(run_ble())
+            if action == "ble":
+                asyncio.run(run_ble())
 
-        if action == "discover":
-            # Import device_scan here to avoid circular imports
+            if action == "discover":
+                # Import device_scan here to avoid circular imports
 
-            try:
-                # Run device scan asynchronously
-                devices = asyncio.run(device_scan())
-                self.mqtt.publish("projectbilal/channel", json.dumps(devices))
-                print(f"Discovery completed, found {len(devices)} devices")
-            except Exception as e:
-                error_response = {"action": "discover_response", "error": str(e)}
-                self.mqtt.publish("projectbilal/channel", json.dumps(error_response))
-                print(f"Discovery failed: {e}")
+                try:
+                    # Run device scan asynchronously
+                    devices = asyncio.run(device_scan())
+                    message = {"chromecasts": devices}
+                    self.mqtt.publish(topic, json.dumps(message))
+                    print(f"Discovery completed, found {len(devices)} devices")
+                except Exception as e:
+                    error_response = {"error": str(e)}
+                    self.mqtt.publish(topic, json.dumps(error_response))
+                    print(f"Discovery failed: {e}")
 
     def play(self, url, ip, port, vol):
         # Handle volume
