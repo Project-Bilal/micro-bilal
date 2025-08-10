@@ -6,7 +6,7 @@ import machine
 from machine import Pin
 from micropython import const
 import esp32
-from mdns_client import Client
+from umqtt.robust import MQTTClient
 from mdns_client.service_discovery.txt_discovery import TXTServiceDiscovery
 
 _BUFFER_SIZE = const(128)  # Make this big enough for your data

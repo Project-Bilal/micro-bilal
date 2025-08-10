@@ -10,7 +10,7 @@ from ble import run_ble
 
 _PING_INTERVAL = const(60)
 _KEEPALIVE = const(120)
-_MQTT_HOST = const("ec2-3-80-146-227.compute-1.amazonaws.com")
+_MQTT_HOST = const("broker.hivemq.com")
 _MQTT_PORT = const(1883)
 
 
@@ -27,7 +27,8 @@ class MQTTHandler(object):
 
         self.mqtt.connect()
         self.mqtt.set_callback(self.sub_cb)
-        self.mqtt.subscribe(self.id)
+        topic = f"projectbilal/{self.id}"
+        self.mqtt.subscribe(topic)
         self.connected = True
         led_toggle("mqtt")
         return True
@@ -36,7 +37,7 @@ class MQTTHandler(object):
         msg = json.loads(msg)
         led_toggle("mqtt")
 
-        action = msg.get("action")
+        action = msg.get("action", {})
         props = msg.get("props", {})
 
         if action == "play":
