@@ -82,6 +82,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # 4. Build mpy-cross (MicroPython cross-compiler)
 # 5. Setup ESP32 port
 # 6. Add AIOBLE (Async BLE) support from micropython-lib
+# 7. Add mDNS support from micropython-mdns (disables built-in MDNS)
 RUN cd /data \
     && git clone https://github.com/micropython/micropython.git ${MICROPYTHON} \
     && cd ${MICROPYTHON} \
@@ -94,7 +95,10 @@ RUN cd /data \
     && cd modules \
     && git clone --depth 1 https://github.com/micropython/micropython-lib.git \
     && cp -r micropython-lib/micropython/bluetooth/aioble/aioble/* aioble/ \
-    && rm -rf micropython-lib
+    && rm -rf micropython-lib \
+    && git clone --depth 1 https://github.com/cbrand/micropython-mdns.git mdns-temp \
+    && cp -r mdns-temp/src/mdns_client . \
+    && rm -rf mdns-temp
 
 # Create partition table for OTA updates
 # nvs: Non-volatile storage for WiFi credentials and other data
@@ -114,13 +118,13 @@ vfs,      data, fat,     0x390000, 0x70000,
 EOL
 EOF
 
-# Configure the custom partition table and enable mDNS in the OTA-specific config
+# Configure the custom partition table and disable built-in mDNS in the OTA-specific config
 RUN cd ${MICROPYTHON}/ports/esp32 && \
     echo "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions-ota.csv\"" >> boards/ESP32_GENERIC/sdkconfig.ota && \
     echo "CONFIG_PARTITION_TABLE_CUSTOM=y" >> boards/ESP32_GENERIC/sdkconfig.ota && \
-    echo "CONFIG_MDNS_MAX_SERVICES=10" >> boards/ESP32_GENERIC/sdkconfig.ota && \
-    echo "CONFIG_MDNS_SERVICE_ADD_TIMEOUT_MS=2000" >> boards/ESP32_GENERIC/sdkconfig.ota && \
-    echo "CONFIG_MDNS_NETWORKING_SOCKET=y" >> boards/ESP32_GENERIC/sdkconfig.ota
+    echo "CONFIG_MDNS_MAX_SERVICES=0" >> boards/ESP32_GENERIC/sdkconfig.ota && \
+    echo "CONFIG_MDNS_SERVICE_ADD_TIMEOUT_MS=0" >> boards/ESP32_GENERIC/sdkconfig.ota && \
+    echo "CONFIG_MDNS_NETWORKING_SOCKET=n" >> boards/ESP32_GENERIC/sdkconfig.ota
 
 # Copy application source files into the MicroPython modules directory
 # chmod 644 ensures files are readable but not executable
