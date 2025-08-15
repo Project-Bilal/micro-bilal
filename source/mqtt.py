@@ -1,5 +1,5 @@
 from umqtt.robust import MQTTClient
-from utils import led_toggle, device_scan
+from utils import led_toggle
 import cast
 import utime as time
 import json
@@ -63,6 +63,7 @@ class MQTTHandler(object):
 
         if action == "discover":
             # Import device_scan here to avoid circular imports
+            from utils import device_scan
 
             try:
                 # Run device scan asynchronously
