@@ -1,97 +1,73 @@
 #!/bin/bash
 
+# Configuration
+IMAGE_NAME="esp32-mdns-ota"
+FIRMWARE_DIR="firmware"
+OUTPUT_DIR="output"
+
 # Remove existing containers
 echo "Removing existing containers..."
-docker rm $(docker ps -a -q --filter ancestor=esp32-image) 2>/dev/null || true
+docker rm $(docker ps -a -q --filter ancestor=$IMAGE_NAME) 2>/dev/null || true
 
 # Remove existing image
 echo "Removing existing image..."
-docker rmi esp32-image 2>/dev/null || true
+docker rmi $IMAGE_NAME 2>/dev/null || true
 
 # Handle output directory
-if [ ! -d "output" ]; then
+if [ ! -d "$OUTPUT_DIR" ]; then
     echo "Creating output directory..."
-    mkdir output
+    mkdir $OUTPUT_DIR
 else
     echo "Cleaning output directory..."
-    rm -rf output/*
+    rm -rf $OUTPUT_DIR/*
+fi
+
+# Handle firmware directory
+if [ ! -d "$FIRMWARE_DIR" ]; then
+    echo "Creating firmware directory..."
+    mkdir $FIRMWARE_DIR
+else
+    echo "Cleaning firmware directory..."
+    rm -rf $FIRMWARE_DIR/*
 fi
 
 # Build Docker image
 echo "Building Docker image..."
-docker build --platform linux/amd64 -t esp32-image . || {
-    echo "Docker build failed"
-    exit 1
-}
+docker build --platform linux/amd64 -t $IMAGE_NAME . || { echo "Docker build failed"; exit 1; }
 
-# Run Docker container
-echo "Running Docker container..."
-docker run --platform linux/amd64 -v "$PWD/output:/data/micropython/ports/esp32/build-ESP32_GENERIC-OTA/" esp32-image || {
-    echo "Docker run failed"
-    exit 1
-}
+# Run Docker container to build firmware
+echo "Running Docker container to build firmware..."
+docker run --rm --platform linux/amd64 -v "$PWD/$FIRMWARE_DIR:/firmware" $IMAGE_NAME || { echo "Docker run failed"; exit 1; }
 
-# Create firmware directory if it doesn't exist
-if [ ! -d "firmware" ]; then
-    echo "Creating firmware directory..."
-    mkdir firmware
+# Ensure firmware.bin exists for flashing
+if [ ! -f "$FIRMWARE_DIR/firmware.bin" ]; then
+    echo "firmware.bin not found! Cannot flash."
+    exit 1
 fi
 
-# Copy firmware files
-echo "Copying firmware files..."
-cp output/firmware.bin firmware/firmware.bin || {
-    echo "Failed to copy firmware.bin"
-    exit 1
-}
-cp output/micropython.bin firmware/micropython.bin || {
-    echo "Failed to copy micropython.bin"
-    exit 1
-}
+# List files for confirmation
+echo "Firmware directory contents:"
+ls -la $FIRMWARE_DIR/
 
 # Ask user about flashing
-read -p "Do you want to erase and flash the binary to ESP32? (y/n): " flash_choice
+read -p "Do you want to erase and flash firmware.bin to ESP32? (y/n): " flash_choice
 
 if [[ $flash_choice =~ ^[Yy]$ ]]; then
-    # List available ports
-    echo "Available USB ports:"
-    available_ports=($(ls /dev/cu.usbserial* 2>/dev/null))
-    
-    if [ ${#available_ports[@]} -eq 0 ]; then
-        echo "No USB serial ports found"
+    if ! command -v esptool.py &> /dev/null; then
+        echo "esptool.py not found. Install it with: pip install esptool"
         exit 1
     fi
-    
-    # Display ports with numbers
-    for i in "${!available_ports[@]}"; do
-        echo "$((i+1)): ${available_ports[$i]}"
-    done
-    
-    # Get user's choice
-    while true; do
-        read -p "Select port number (1-${#available_ports[@]}): " port_num
-        if [[ "$port_num" =~ ^[0-9]+$ ]] && [ "$port_num" -ge 1 ] && [ "$port_num" -le "${#available_ports[@]}" ]; then
-            break
-        fi
-        echo "Invalid selection. Please try again."
-    done
-    
-    selected_port="${available_ports[$((port_num-1))]}"
-    
-    # Erase flash
+
+    # Erase and flash
     echo "Erasing flash..."
-    esptool.py --port "$selected_port" erase_flash || {
-        echo "Flash erase failed"
-        exit 1
+    esptool.py --port /dev/cu.usbserial-10 erase_flash || { echo "Erase failed"; exit 1; }
+
+    echo "Flashing firmware.bin..."
+    esptool.py --chip esp32 --port /dev/cu.usbserial-10 --baud 460800 write_flash -z 0x1000 "$FIRMWARE_DIR/firmware.bin" || {
+        echo "Flashing failed"; exit 1;
     }
-    
-    # Flash firmware
-    echo "Flashing firmware..."
-    esptool.py --chip esp32 --port "$selected_port" --baud 460800 write_flash -z 0x1000 output/firmware.bin || {
-        echo "Firmware flash failed"
-        exit 1
-    }
-    
-    echo "Flashing complete!"
+
+    echo "Flashing complete! ESP32 is ready."
 fi
 
-echo "All operations completed successfully!"
+echo "All operations completed. Firmware files are in $FIRMWARE_DIR/"

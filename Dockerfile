@@ -4,11 +4,12 @@
 # Start with Ubuntu 22.04 and specify platform to ensure consistent builds
 # The 'as builder' allows for potential multi-stage builds if needed later
 FROM --platform=linux/amd64 ubuntu:22.04 as builder
-LABEL Name=esp32-micropython-image-builder Version=0.0.4
+LABEL Name=esp32-micropython-image-builder Version=1.0.0
 
 # Define versions as build arguments for easy updates without changing the rest of the Dockerfile
 # ESP-IDF is the Espressif IoT Development Framework
 # MicroPython is the Python implementation for microcontrollers
+# Using ESP-IDF v5.0.4 which has better compatibility with MicroPython v1.26.0
 ARG ESP_IDF_VERSION=v5.1.1
 ARG MICROPYTHON_VERSION=v1.22.2
 
@@ -80,9 +81,8 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # 2. Checkout specific version
 # 3. Initialize submodules
 # 4. Build mpy-cross (MicroPython cross-compiler)
-# 5. Setup ESP32 port
+# 5. Setup ESP32 port (with ESP-IDF environment sourced)
 # 6. Add AIOBLE (Async BLE) support from micropython-lib
-# 7. Add mDNS support from micropython-mdns (disables built-in MDNS)
 RUN cd /data \
     && git clone https://github.com/micropython/micropython.git ${MICROPYTHON} \
     && cd ${MICROPYTHON} \
@@ -90,6 +90,8 @@ RUN cd /data \
     && git submodule update --init --recursive \
     && make -C mpy-cross \
     && cd ports/esp32 \
+    && export IDF_PATH=${ESPIDF} \
+    && . ${ESPIDF}/export.sh \
     && make submodules \
     && mkdir -p modules/aioble \
     && cd modules \
@@ -118,13 +120,18 @@ vfs,      data, fat,     0x390000, 0x70000,
 EOL
 EOF
 
-# Configure the custom partition table and disable built-in mDNS in the OTA-specific config
+# Configure the custom partition table and enable mDNS in the OTA-specific config
 RUN cd ${MICROPYTHON}/ports/esp32 && \
     echo "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions-ota.csv\"" >> boards/ESP32_GENERIC/sdkconfig.ota && \
     echo "CONFIG_PARTITION_TABLE_CUSTOM=y" >> boards/ESP32_GENERIC/sdkconfig.ota && \
-    echo "CONFIG_MDNS_MAX_SERVICES=0" >> boards/ESP32_GENERIC/sdkconfig.ota && \
-    echo "CONFIG_MDNS_SERVICE_ADD_TIMEOUT_MS=0" >> boards/ESP32_GENERIC/sdkconfig.ota && \
-    echo "CONFIG_MDNS_NETWORKING_SOCKET=n" >> boards/ESP32_GENERIC/sdkconfig.ota
+    echo "CONFIG_MDNS_MAX_SERVICES=10" >> boards/ESP32_GENERIC/sdkconfig.ota && \
+    echo "CONFIG_MDNS_SERVICE_ADD_TIMEOUT_MS=2000" >> boards/ESP32_GENERIC/sdkconfig.ota && \
+    echo "CONFIG_MDNS_NETWORKING_SOCKET=y" >> boards/ESP32_GENERIC/sdkconfig.ota && \
+    echo "CONFIG_MDNS_ENABLED=n" >> boards/ESP32_GENERIC/sdkconfig.ota && \
+    echo "CONFIG_MDNS_RESPONDER=n" >> boards/ESP32_GENERIC/sdkconfig.ota && \
+    echo "CONFIG_MDNS_QUERY=n" >> boards/ESP32_GENERIC/sdkconfig.ota && \
+    echo "CONFIG_ESP_TASK_WDT_PANIC=y" >> boards/ESP32_GENERIC/sdkconfig.ota && \
+    echo "CONFIG_ESP_SYSTEM_PANIC=ESP_SYSTEM_PANIC_PRINT_REBOOT" >> boards/ESP32_GENERIC/sdkconfig.ota
 
 # Copy application source files into the MicroPython modules directory
 # chmod 644 ensures files are readable but not executable
@@ -138,18 +145,67 @@ WORKDIR ${MICROPYTHON}/ports/esp32
 # 1. Source ESP-IDF environment
 # 2. Clean previous builds
 # 3. Build MicroPython with OTA support
+# 4. Copy firmware files to the mounted volume
 RUN <<EOF cat > /entrypoint.sh
 #!/bin/bash
 set -eo pipefail
 
-# Source ESP-IDF environment
+# Set IDF_PATH and source ESP-IDF environment
+export IDF_PATH=${ESPIDF}
 . ${ESPIDF}/export.sh
 
 # Clean previous builds
 idf.py fullclean
 
 # Execute make with OTA variant and explicit partition table
-PARTITION_TABLE_CSV=partitions-ota.csv make BOARD=ESP32_GENERIC BOARD_VARIANT=OTA USER_C_MODULES= PYTHON=${IDF_PYTHON:-python3} ESPIDF= "\$@"
+PARTITION_TABLE_CSV=partitions-ota.csv make BOARD=ESP32_GENERIC BOARD_VARIANT=OTA USER_C_MODULES= PYTHON=\${IDF_PYTHON:-python3} ESPIDF= "\$@"
+# After successful build, copy firmware files to /firmware if the directory exists
+if [ -d "/firmware" ]; then
+    echo "Copying firmware files to /firmware directory..."
+    
+    # Find the build directory
+    BUILD_DIR="build-ESP32_GENERIC-OTA"
+    
+    if [ -d "\$BUILD_DIR" ]; then
+        # Copy the main firmware binary (this is the combined firmware)
+        if [ -f "\$BUILD_DIR/firmware.bin" ]; then
+            cp "\$BUILD_DIR/firmware.bin" "/firmware/firmware.bin"
+            echo "Copied main firmware: firmware.bin"
+        fi
+        
+        # Copy individual components (bootloader, partition table, application)
+        if [ -f "\$BUILD_DIR/bootloader/bootloader.bin" ]; then
+            cp "\$BUILD_DIR/bootloader/bootloader.bin" "/firmware/bootloader.bin"
+            echo "Copied bootloader: bootloader.bin"
+        fi
+        
+        if [ -f "\$BUILD_DIR/partition_table/partition-table.bin" ]; then
+            cp "\$BUILD_DIR/partition_table/partition-table.bin" "/firmware/partition-table.bin"
+            echo "Copied partition table: partition-table.bin"
+        fi
+        
+        if [ -f "\$BUILD_DIR/micropython.bin" ]; then
+            cp "\$BUILD_DIR/micropython.bin" "/firmware/micropython.bin"
+            echo "Copied application: micropython.bin"
+        fi
+        
+        # List all available files in build directory for debugging
+        echo "All files in build directory:"
+        find "\$BUILD_DIR" -name "*.bin" -type f
+        
+        # List what we actually copied
+        echo "Files copied to /firmware:"
+        ls -la /firmware/
+    else
+        echo "Build directory \$BUILD_DIR not found!"
+        echo "Available directories:"
+        ls -la
+    fi
+else
+    echo "/firmware directory not mounted - firmware files remain in build directory"
+    echo "Available firmware files:"
+    find . -name "*.bin" -type f
+fi
 EOF
 
 # Make the entrypoint script executable
