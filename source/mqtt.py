@@ -89,11 +89,12 @@ class MQTTHandler(object):
                 # Send confirmation back
                 message = {"status": "success", "message": "WiFi credentials deleted"}
                 self.mqtt.publish(topic, json.dumps(message))
-                
+
                 # Wait a moment for message to be sent, then reboot
                 time.sleep(1)
                 print("Rebooting ESP32...")
                 import machine
+
                 machine.reset()
             except Exception as e:
                 error_response = {
