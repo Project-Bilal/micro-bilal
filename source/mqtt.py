@@ -76,6 +76,23 @@ class MQTTHandler(object):
                 self.mqtt.publish(topic, json.dumps(error_response))
                 print(f"Discovery failed: {e}")
 
+        if action == "delete_device":
+            try:
+                import esp32
+                nvs = esp32.NVS("wifi_creds")
+                nvs.erase_key("PASSWORD")
+                nvs.erase_key("SSID")
+                nvs.erase_key("SECURITY")
+                print("WiFi credentials deleted from NVS")
+                
+                # Send confirmation back
+                message = {"status": "success", "message": "WiFi credentials deleted"}
+                self.mqtt.publish(topic, json.dumps(message))
+            except Exception as e:
+                error_response = {"status": "error", "message": f"Failed to delete WiFi credentials: {str(e)}"}
+                self.mqtt.publish(topic, json.dumps(error_response))
+                print(f"Failed to delete WiFi credentials: {e}")
+
     def play(self, url, ip, port, vol):
         # Handle volume
         device = cast.Chromecast(ip, port)
