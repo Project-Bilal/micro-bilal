@@ -79,17 +79,27 @@ class MQTTHandler(object):
         if action == "delete_device":
             try:
                 import esp32
+
                 nvs = esp32.NVS("wifi_creds")
                 nvs.erase_key("PASSWORD")
                 nvs.erase_key("SSID")
                 nvs.erase_key("SECURITY")
                 print("WiFi credentials deleted from NVS")
-                
+
                 # Send confirmation back
                 message = {"status": "success", "message": "WiFi credentials deleted"}
                 self.mqtt.publish(topic, json.dumps(message))
+                
+                # Wait a moment for message to be sent, then reboot
+                time.sleep(1)
+                print("Rebooting ESP32...")
+                import machine
+                machine.reset()
             except Exception as e:
-                error_response = {"status": "error", "message": f"Failed to delete WiFi credentials: {str(e)}"}
+                error_response = {
+                    "status": "error",
+                    "message": f"Failed to delete WiFi credentials: {str(e)}",
+                }
                 self.mqtt.publish(topic, json.dumps(error_response))
                 print(f"Failed to delete WiFi credentials: {e}")
 
