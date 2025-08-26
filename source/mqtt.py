@@ -7,9 +7,9 @@ from micropython import const
 import ota.update
 import uasyncio as asyncio
 from ble import run_ble
+import machine
 
-_PING_INTERVAL = const(60)
-_KEEPALIVE = const(120)
+_KEEPALIVE = const(15)  # 15 seconds for faster offline detection
 _MQTT_HOST = const("broker.hivemq.com")
 _MQTT_PORT = const(1883)
 
@@ -19,11 +19,24 @@ class MQTTHandler(object):
         self.mqtt = None
         self.id = id
         self.connected = False
+        self.lwt_topic = f"projectbilal/{self.id}/status"
+        self.lwt_message = "offline"
 
     def mqtt_connect(self):
         self.mqtt = MQTTClient(
-            client_id=self.id, server=_MQTT_HOST, port=_MQTT_PORT, keepalive=_KEEPALIVE
+            client_id=self.id,
+            server=_MQTT_HOST,
+            port=_MQTT_PORT,
+            keepalive=_KEEPALIVE,
         )
+
+        # Configure Last Will and Testament before connecting
+        try:
+            self.mqtt.set_last_will(
+                self.lwt_topic, self.lwt_message, retain=False, qos=1
+            )
+        except Exception as e:
+            print("Warning: set_last_will failed:", e)
 
         self.mqtt.connect()
         self.mqtt.set_callback(self.sub_cb)
@@ -31,7 +44,31 @@ class MQTTHandler(object):
         self.mqtt.subscribe(topic)
         self.connected = True
         led_toggle("mqtt")
+
+        # Send online status when connecting
+        self.send_status_update("online")
+
         return True
+
+    def send_status_update(self, status):
+        """Send status update to the status topic"""
+        try:
+            self.mqtt.publish(self.lwt_topic, status)
+            print(f"Status update sent: {status}")
+        except Exception as e:
+            print(f"Failed to send status update: {e}")
+
+    def mqtt_disconnect(self):
+        """Gracefully disconnect and send offline status"""
+        try:
+            if self.connected and self.mqtt:
+                self.send_status_update("offline")
+                time.sleep(0.5)  # Give time for message to be sent
+                self.mqtt.disconnect()
+                self.connected = False
+                print("MQTT disconnected gracefully")
+        except Exception as e:
+            print(f"Error during disconnect: {e}")
 
     def sub_cb(self, topic, msg):
         try:
@@ -117,12 +154,12 @@ class MQTTHandler(object):
 
     def mqtt_run(self):
         print("Connected and listening to MQTT Broker")
-        counter = 0
         while True:
-            time.sleep(1)
-            self.mqtt.check_msg()
+            try:
+                time.sleep(1)
+                self.mqtt.check_msg()
 
-            counter += 1
-            if counter >= _PING_INTERVAL:
-                counter = 0
-                self.mqtt.ping()
+            except Exception as e:
+                print(f"MQTT error in run loop: {e}")
+                # If there's an error, just continue - the LWT will handle offline status
+                time.sleep(5)  # Wait a bit before continuing
