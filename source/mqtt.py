@@ -155,11 +155,5 @@ class MQTTHandler(object):
     def mqtt_run(self):
         print("Connected and listening to MQTT Broker")
         while True:
-            try:
-                time.sleep(1)
-                self.mqtt.check_msg()
-
-            except Exception as e:
-                print(f"MQTT error in run loop: {e}")
-                # If there's an error, just continue - the LWT will handle offline status
-                time.sleep(5)  # Wait a bit before continuing
+            time.sleep(1)
+            self.mqtt.check_msg()
