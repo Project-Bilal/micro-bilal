@@ -9,7 +9,8 @@ import uasyncio as asyncio
 from ble import run_ble
 import machine
 
-_KEEPALIVE = const(15)  # 15 seconds for faster offline detection
+_PING_INTERVAL = const(60)
+_KEEPALIVE = const(30)  # Reduced from 120 to 30 seconds for faster offline detection
 _MQTT_HOST = const("broker.hivemq.com")
 _MQTT_PORT = const(1883)
 
@@ -154,6 +155,14 @@ class MQTTHandler(object):
 
     def mqtt_run(self):
         print("Connected and listening to MQTT Broker")
+        counter = 0
         while True:
             time.sleep(1)
             self.mqtt.check_msg()
+
+            counter += 1
+            if counter >= _PING_INTERVAL:
+                counter = 0
+                self.mqtt.ping()
+
+        print("MQTT run loop ended")
