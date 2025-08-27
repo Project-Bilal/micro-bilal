@@ -10,7 +10,7 @@ from ble import run_ble
 import machine
 
 _PING_INTERVAL = const(60)
-_KEEPALIVE = const(30)  # Reduced from 120 to 30 seconds for faster offline detection
+_KEEPALIVE = const(15)  # Reduced from 120 to 30 seconds for faster offline detection
 _MQTT_HOST = const("broker.hivemq.com")
 _MQTT_PORT = const(1883)
 
