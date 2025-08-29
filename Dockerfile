@@ -120,13 +120,13 @@ vfs,      data, fat,     0x390000, 0x70000,
 EOL
 EOF
 
-# Configure the custom partition table and completely disable built-in mDNS to avoid conflicts
+# Configure the custom partition table and enable mDNS in the OTA-specific config
 RUN cd ${MICROPYTHON}/ports/esp32 && \
     echo "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions-ota.csv\"" >> boards/ESP32_GENERIC/sdkconfig.ota && \
     echo "CONFIG_PARTITION_TABLE_CUSTOM=y" >> boards/ESP32_GENERIC/sdkconfig.ota && \
-    echo "CONFIG_MDNS_MAX_SERVICES=0" >> boards/ESP32_GENERIC/sdkconfig.ota && \
-    echo "CONFIG_MDNS_SERVICE_ADD_TIMEOUT_MS=0" >> boards/ESP32_GENERIC/sdkconfig.ota && \
-    echo "CONFIG_MDNS_NETWORKING_SOCKET=n" >> boards/ESP32_GENERIC/sdkconfig.ota && \
+    echo "CONFIG_MDNS_MAX_SERVICES=10" >> boards/ESP32_GENERIC/sdkconfig.ota && \
+    echo "CONFIG_MDNS_SERVICE_ADD_TIMEOUT_MS=2000" >> boards/ESP32_GENERIC/sdkconfig.ota && \
+    echo "CONFIG_MDNS_NETWORKING_SOCKET=y" >> boards/ESP32_GENERIC/sdkconfig.ota && \
     echo "CONFIG_MDNS_ENABLED=n" >> boards/ESP32_GENERIC/sdkconfig.ota && \
     echo "CONFIG_MDNS_RESPONDER=n" >> boards/ESP32_GENERIC/sdkconfig.ota && \
     echo "CONFIG_MDNS_QUERY=n" >> boards/ESP32_GENERIC/sdkconfig.ota && \
