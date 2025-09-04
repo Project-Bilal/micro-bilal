@@ -66,6 +66,7 @@ async def control_task(connection, char):
                             "MESSAGE": "ssid",
                             "SSID": ssid[0],
                             "SECURITY": ssid[2],
+                            "RSSI": ssid[1],
                         }
                         msg = json.dumps(msg).encode("utf-8")
                         char.notify(connection, msg)
