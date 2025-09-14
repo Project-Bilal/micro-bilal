@@ -13,8 +13,6 @@ from ustruct import pack, unpack
 import ujson as json
 import utime as time
 
-# TODO: update this to use S3 instead of Google Cloud Storage and new logo
-# thumbnail that shows up on Google Home with screen
 THUMB = "https://storage.googleapis.com/athans/athan_logo.png"
 
 
@@ -22,10 +20,10 @@ def calc_variant(value):
     """
     Encodes an integer value into a variable-length format using protocol buffers varint encoding.
     This is used in the Google Cast protocol for message length encoding.
-    
+
     Args:
         value: Integer to encode
-        
+
     Returns:
         bytes: Encoded value in protocol buffer varint format
     """
@@ -45,7 +43,7 @@ class Chromecast(object):
     def __init__(self, cast_ip, cast_port):
         """
         Initialize connection to Chromecast device.
-        
+
         Args:
             cast_ip: IP address of the Chromecast
             cast_port: Port number for the Chromecast (typically 8009)
@@ -55,7 +53,7 @@ class Chromecast(object):
         self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.s.connect((self.ip, cast_port))
         self.s = ssl.wrap_socket(self.s)
-        
+
         # Send initial CONNECT message to establish connection
         self.s.write(
             b'\x00\x00\x00Y\x08\x00\x12\x08sender-0\x1a\nreceiver-0"(urn:x-cast:com.google.cast.tp.connection(\x002\x13{"type": "CONNECT"}'
@@ -68,7 +66,7 @@ class Chromecast(object):
     def set_volume(self, volume):
         """
         Set the volume level of the Chromecast.
-        
+
         Args:
             volume: String representing volume level (e.g., '0.50' for 50%)
         """
@@ -79,10 +77,10 @@ class Chromecast(object):
     def play_url(self, url):
         """
         Play audio from specified URL on the Chromecast.
-        
+
         Args:
             url: String URL of the audio to play
-            
+
         Returns:
             bool: True if playback was successfully started, False otherwise
         """
@@ -103,7 +101,7 @@ class Chromecast(object):
                     transport_id = response.split(b'"transportId"')[1].split(b'"')[1]
                 except:
                     pass
-                    
+
             # Send CONNECT message with device and client information
             self.s.write(
                 b'\x00\x00\x01Q\x08\x00\x12\x08sender-0\x1a$%s"(urn:x-cast:com.google.cast.tp.connection(\x002\xf0\x01{"type": "CONNECT", "origin": {}, "userAgent": "PyChromecast", "senderInfo": {"sdkType": 2, "version": "15.605.1.3", "browserVersion": "44.0.2403.30", "platform": 4, "systemVersion": "Macintosh; Intel Mac OS X10_10_3", "connectionType": 1}}'
@@ -136,7 +134,7 @@ class Chromecast(object):
                 "sessionId": transport_id,
             }
         )
-        
+
         # Construct final message with proper protocol formatting
         msg = (
             (
@@ -146,7 +144,7 @@ class Chromecast(object):
             + calc_variant(len(payload))
             + payload
         )
-        
+
         # Attempt to send play message multiple times if needed
         # Sometimes first attempt fails if connection was idle
         for i in range(2):
@@ -156,13 +154,13 @@ class Chromecast(object):
                 status = self.read_message()
                 if status.find(b'"title":"Bilal Cast"') != -1:
                     return True
-            
+
         return False  # Return False if media failed to load after all attempts
 
     def read_message(self):
         """
         Read a message from the Chromecast device.
-        
+
         Returns:
             bytes: The message content received from the device
         """

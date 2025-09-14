@@ -39,7 +39,7 @@ def led_off():
 
 
 # get mac address for mqtt connection
-def get_mac():  # TODO: update this to work with pico
+def get_mac():
     mac_hex = machine.unique_id()
     mac = "-".join("%02x" % b for b in mac_hex)
     return mac
