@@ -11,7 +11,7 @@ import machine
 
 _PING_INTERVAL = const(10)  # this needs to be less than keepalive
 _KEEPALIVE = const(30)  # Reduced from 120 to 30 seconds for faster offline detection
-_MQTT_HOST = const("broker.hivemq.com")
+_MQTT_HOST = const("34.53.103.114")
 _MQTT_PORT = const(1883)
 
 
