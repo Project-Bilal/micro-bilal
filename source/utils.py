@@ -13,7 +13,7 @@ from mdns_client.client import Client
 _BUFFER_SIZE = const(128)  # Make this big enough for your data
 _NVS_NAME = const("wifi_creds")  # NVS namespace
 
-_WIFI_TIMEOUT = const(10)  # WiFi connection timeout in seconds
+_WIFI_TIMEOUT = const(15)  # WiFi connection timeout in seconds
 
 _LED_PIN = const(2)  # For the ESP32 built-in LED
 _BLINK_DELAY = const(0.25)  # Blink delay in seconds
