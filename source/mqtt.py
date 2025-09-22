@@ -1,4 +1,4 @@
-from umqtt.robust import MQTTClient
+from umqtt.simple import MQTTClient
 from utils import led_toggle
 import cast
 import utime as time
@@ -156,13 +156,62 @@ class MQTTHandler(object):
     def mqtt_run(self):
         print("Connected and listening to MQTT Broker")
         counter = 0
-        while True:
-            time.sleep(1)
-            self.mqtt.check_msg()
+        reconnect_attempts = 0
+        reconnect_delay = 5  # Start with 5 seconds
+        max_reconnect_delay = 60  # Max 60 seconds between attempts
 
-            counter += 1
-            if counter >= _PING_INTERVAL:
-                counter = 0
-                self.mqtt.ping()
+        while True:
+            try:
+                time.sleep(1)
+                self.mqtt.check_msg()
+
+                counter += 1
+                if counter >= _PING_INTERVAL:
+                    counter = 0
+                    try:
+                        self.mqtt.ping()
+                        # Reset reconnect attempts on successful ping
+                        reconnect_attempts = 0
+                        reconnect_delay = 5
+                    except Exception as ping_error:
+                        print(f"Ping failed: {ping_error}")
+                        raise Exception("Connection lost - ping failed")
+
+            except Exception as e:
+                print(f"MQTT connection lost: {e}")
+
+                reconnect_attempts += 1
+                print(f"Attempting to reconnect (attempt {reconnect_attempts})")
+
+                # Clean up current connection
+                try:
+                    if self.mqtt:
+                        self.mqtt.disconnect()
+                except:
+                    pass
+
+                # Wait before reconnecting
+                print(f"Waiting {reconnect_delay} seconds before reconnect...")
+                time.sleep(reconnect_delay)
+
+                # Attempt to reconnect
+                try:
+                    success = self.mqtt_connect()
+                    if success:
+                        print("Reconnection successful!")
+                        # Send online status after successful reconnection
+                        self.send_status_update("online")
+                        reconnect_attempts = 0
+                        reconnect_delay = 5
+                        counter = 0  # Reset counter
+                    else:
+                        print("Reconnection failed")
+                        # Exponential backoff: double the delay for next attempt
+                        reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
+
+                except Exception as reconnect_error:
+                    print(f"Reconnection attempt failed: {reconnect_error}")
+                    # Exponential backoff: double the delay for next attempt
+                    reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
 
         print("MQTT run loop ended")
