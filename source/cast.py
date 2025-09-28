@@ -1,175 +1,243 @@
-# Description: This file contains the Chromecast class that handles connecting to the Chromecast and casting to it
-# When a message is sent to the ESP32 via MQTT, a Chromecast object is created
-
-# Import necessary modules
-# usocket: MicroPython's socket implementation for network connections
-# ssl: For secure socket layer connections
-# ustruct: For packing/unpacking binary data
-# ujson: MicroPython's JSON implementation
-# utime: MicroPython's time implementation
-import usocket as socket
+import socket
 import ssl
-from ustruct import pack, unpack
-import ujson as json
-import utime as time
+import time
+from struct import pack, unpack
+import gc
 
-THUMB = "https://storage.googleapis.com/athans/athan_logo.png"
+# Chromecast Configuration
+# Note: Using byte strings (b"...") is common and efficient in MicroPython
+THUMB = b"https://storage.googleapis.com/athans/athan_logo.png"
+
+# Default Protobuf Message Fields
+_SRC = b"sender-0"
+_RECV = b"receiver-0"
+
+# Chromecast Namespaces
+_NS_CONN = b"urn:x-cast:com.google.cast.tp.connection"
+_NS_RECV = b"urn:x-cast:com.google.cast.receiver"
+_NS_MEDIA = b"urn:x-cast:com.google.cast.media"
+
+# App ID for the Default Media Receiver (used for audio/video streaming)
+_DEFAULT_MEDIA_APP_ID = b"CC1AD845"
 
 
-def calc_variant(value):
+def _varint(n):
+    """Minimal protobuf varint encoder (bytes)."""
+    out = bytearray()
+    while n > 0x7F:
+        out.append((n & 0x7F) | 0x80)
+        n >>= 7
+    out.append(n)
+    return bytes(out)
+
+
+def _frame(namespace, payload_utf8, dest=_RECV, src=_SRC):
     """
-    Encodes an integer value into a variable-length format using protocol buffers varint encoding.
-    This is used in the Google Cast protocol for message length encoding.
-
-    Args:
-        value: Integer to encode
-
-    Returns:
-        bytes: Encoded value in protocol buffer varint format
+    Build a CastMessage protobuf frame, preceded by the 4-byte length.
     """
-    byte_list = []
-    while value > 0x7F:  # While value is larger than 7 bits
-        byte_list += [value & 0x7F | 0x80]  # Take 7 bits and set the MSB
-        value >>= 7  # Shift right by 7 bits
-    return bytes(byte_list + [value])
+    if isinstance(namespace, str):
+        namespace = namespace.encode()
+    if isinstance(dest, str):
+        dest = dest.encode()
+    if isinstance(payload_utf8, str):
+        payload_utf8 = payload_utf8.encode()
+
+    # Protobuf body fields
+    body = (
+        b"\x08\x00"  # protocol_version = 0
+        + b"\x12"
+        + _varint(len(src))
+        + src  # source_id
+        + b"\x1a"
+        + _varint(len(dest))
+        + dest  # destination_id
+        + b"\x22"
+        + _varint(len(namespace))
+        + namespace  # namespace
+        + b"\x28\x00"  # payload_type = STRING (0)
+        + b"\x32"
+        + _varint(len(payload_utf8))
+        + payload_utf8  # payload_utf8
+    )
+    # Prepend 4-byte big-endian length of the body
+    return pack(">I", len(body)) + body
 
 
 class Chromecast(object):
-    """
-    A class to handle Chromecast communication and media control.
-    Uses the Google Cast protocol to connect to and control Chromecast devices.
-    """
+    """A class to handle Chromecast communication and media control."""
 
-    def __init__(self, cast_ip, cast_port):
-        """
-        Initialize connection to Chromecast device.
-
-        Args:
-            cast_ip: IP address of the Chromecast
-            cast_port: Port number for the Chromecast (typically 8009)
-        """
+    def __init__(self, cast_ip, cast_port, timeout_s=5):
         self.ip = cast_ip
-        # Create TCP socket and establish SSL connection
-        self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.s.connect((self.ip, cast_port))
-        self.s = ssl.wrap_socket(self.s)
+        self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            self._sock.settimeout(timeout_s)
+        except Exception:
+            pass
 
-        # Send initial CONNECT message to establish connection
-        self.s.write(
-            b'\x00\x00\x00Y\x08\x00\x12\x08sender-0\x1a\nreceiver-0"(urn:x-cast:com.google.cast.tp.connection(\x002\x13{"type": "CONNECT"}'
-        )
-        # Request initial device status
-        self.s.write(
-            b'\x00\x00\x00g\x08\x00\x12\x08sender-0\x1a\nreceiver-0"#urn:x-cast:com.google.cast.receiver(\x002&{"type": "GET_STATUS", "requestId": 1}'
-        )
+        # Connect and wrap socket with SSL
+        self._sock.connect((self.ip, cast_port))
+        self.s = ssl.wrap_socket(self._sock)
+
+        # Send initial CONNECT and GET_STATUS messages
+        self._send(_frame(_NS_CONN, b'{"type":"CONNECT"}'))
+        self._send(_frame(_NS_RECV, b'{"type":"GET_STATUS","requestId":1}'))
+
+    # --- Low-Level Socket Operations (for MicroPython reliability) ---
+
+    def _send(self, data):
+        """Send all data on SSL sockets (handles partial writes)."""
+        mv = memoryview(data)
+        total = 0
+        while total < len(data):
+            n = self.s.write(mv[total:])
+            if n is None:
+                # Some MicroPython ports return None; treat as all written
+                break
+            total += n
+
+    def _read_exact(self, n):
+        """Read exactly n bytes or raise (handles partial reads)."""
+        chunks = bytearray()
+        got = 0
+        while got < n:
+            chunk = self.s.read(n - got)
+            if not chunk:
+                raise OSError("socket closed while reading")
+            chunks.extend(chunk)
+            got += len(chunk)
+        return bytes(chunks)
+
+    def read_message(self, max_size=65536):
+        """Read one Cast message (4-byte size + protobuf body)."""
+        size_bytes = self._read_exact(4)
+        siz = unpack(">I", size_bytes)[0]
+        if siz <= 0 or siz > max_size:
+            raise OSError("invalid cast frame size: %d" % siz)
+        return self._read_exact(siz)
+
+    # --- Utility Methods for Time (MicroPython compatibility) ---
+
+    @staticmethod
+    def _ticks_ms():
+        try:
+            return time.ticks_ms()
+        except AttributeError:
+            return int(time.time() * 1000)
+
+    @staticmethod
+    def _ticks_diff(a, b):
+        try:
+            return time.ticks_diff(a, b)
+        except AttributeError:
+            return a - b
+
+    # --- Core Chromecast Methods ---
 
     def set_volume(self, volume):
-        """
-        Set the volume level of the Chromecast.
+        """Set the volume level of the Chromecast (0.0 to 1.0)."""
+        if isinstance(volume, float):
+            # Format to two decimal places, removing trailing zeros/dot
+            v = ("%.2f" % volume).rstrip("0").rstrip(".")
+        else:
+            v = str(volume)
 
-        Args:
-            volume: String representing volume level (e.g., '0.50' for 50%)
-        """
-        r_volmsg = b'\x00\x00\x00\x81\x08\x00\x12\x08sender-0\x1a\nreceiver-0"#urn:x-cast:com.google.cast.receiver(\x002@{"type": "SET_VOLUME", "volume": {"level": ###}, "requestId": 2}'
-        r_volmsg = r_volmsg.replace(b"###", bytes(volume, "utf-8"))
-        self.s.write(r_volmsg)
+        payload = (
+            b'{"type":"SET_VOLUME","volume":{"level":'
+            + v.encode()
+            + b'},"requestId":2}'
+        )
+        self._send(_frame(_NS_RECV, payload, dest=_RECV))
 
     def play_url(self, url):
-        """
-        Play audio from specified URL on the Chromecast.
+        """Play audio from specified URL on the Chromecast."""
+        if isinstance(url, str):
+            url_b = url.encode()
+        else:
+            url_b = url
 
-        Args:
-            url: String URL of the audio to play
-
-        Returns:
-            bool: True if playback was successfully started, False otherwise
-        """
-        # Launch the Default Media Receiver app (CC1AD845)
-        self.s.write(
-            (
-                b'\x00\x00\x00x\x08\x00\x12\x08sender-0\x1a\nreceiver-0"#urn:x-cast:com.google.cast.receiver(\x0027{"type": "LAUNCH", "appId": "CC1AD845", "requestId": 3}'
+        # 1. Launch the Default Media Receiver app
+        self._send(
+            _frame(
+                _NS_RECV,
+                b'{"type":"LAUNCH","appId":"'
+                + _DEFAULT_MEDIA_APP_ID
+                + b'","requestId":3}',
             )
         )
 
-        # Need to establish media channel twice to ensure reliable connection
-        for i in range(2):
-            transport_id = None
-            # Keep trying to get transport ID from device responses
-            while not transport_id:
-                try:
-                    response = self.read_message()
-                    transport_id = response.split(b'"transportId"')[1].split(b'"')[1]
-                except:
-                    pass
+        # 2. Wait for the new session's transport ID
+        transport_id = self._wait_for_transport_id(timeout_ms=5000)
+        if not transport_id:
+            print("Error: Failed to get transport ID for new session.")
+            return False
 
-            # Send CONNECT message with device and client information
-            self.s.write(
-                b'\x00\x00\x01Q\x08\x00\x12\x08sender-0\x1a$%s"(urn:x-cast:com.google.cast.tp.connection(\x002\xf0\x01{"type": "CONNECT", "origin": {}, "userAgent": "PyChromecast", "senderInfo": {"sdkType": 2, "version": "15.605.1.3", "browserVersion": "44.0.2403.30", "platform": 4, "systemVersion": "Macintosh; Intel Mac OS X10_10_3", "connectionType": 1}}'
-                % transport_id
-            )
-            # Request media status
-            self.s.write(
-                b'\x00\x00\x00~\x08\x00\x12\x08sender-0\x1a$%s" urn:x-cast:com.google.cast.media(\x002&{"type": "GET_STATUS", "requestId": 4}'
-                % transport_id
-            )
-
-        # Prepare media playback message with metadata
-        payload = json.dumps(
-            {
-                "media": {
-                    "contentId": url,
-                    "streamType": "BUFFERED",
-                    "contentType": "audio/mp3",
-                    "metadata": {
-                        "title": "Bilal Cast",
-                        "metadataType": 0,
-                        "thumb": THUMB,
-                        "images": [{"url": THUMB}],
-                    },
-                },
-                "type": "LOAD",
-                "autoplay": True,
-                "customData": {},
-                "requestId": 5,
-                "sessionId": transport_id,
-            }
+        # 3. Connect to the specific media session transport
+        self._send(_frame(_NS_CONN, b'{"type":"CONNECT"}', dest=transport_id))
+        self._send(
+            _frame(_NS_MEDIA, b'{"type":"GET_STATUS","requestId":4}', dest=transport_id)
         )
 
-        # Construct final message with proper protocol formatting
-        msg = (
-            (
-                b'\x08\x00\x12\x08sender-0\x1a$%s" urn:x-cast:com.google.cast.media(\x002'
-                % transport_id
-            )
-            + calc_variant(len(payload))
-            + payload
+        # 4. Construct and send the LOAD command
+        load_payload = (
+            b'{"media":{"contentId":"'
+            + url_b
+            + b'","streamType":"BUFFERED","contentType":"audio/mp3","metadata":'
+            b'{"metadataType":0,"title":"Bilal Cast","thumb":"'
+            + THUMB
+            + b'","images":[{"url":"'
+            + THUMB
+            + b'"}]}},'
+            b'"type":"LOAD","autoplay":true,"customData":{},"requestId":5,"sessionId":"'
+            + transport_id
+            + b'"}'
         )
+        self._send(_frame(_NS_MEDIA, load_payload, dest=transport_id))
 
-        # Attempt to send play message multiple times if needed
-        # Sometimes first attempt fails if connection was idle
-        for i in range(2):
-            self.s.write(pack(">I", len(msg)) + msg)
-            # Check responses for confirmation of media load
-            for _ in range(4):
+        # 5. Check for successful MEDIA_STATUS response
+        for _ in range(6):
+            try:
                 status = self.read_message()
-                if status.find(b'"title":"Bilal Cast"') != -1:
-                    return True
+            except OSError:
+                break
+            # Look for the MEDIA_STATUS type and the custom title to confirm load
+            if b'"type":"MEDIA_STATUS"' in status and b'"Bilal Cast"' in status:
+                return True
 
-        return False  # Return False if media failed to load after all attempts
+        return False
 
-    def read_message(self):
+    def _wait_for_transport_id(self, timeout_ms=4000):
         """
-        Read a message from the Chromecast device.
-
-        Returns:
-            bytes: The message content received from the device
+        Wait for a message containing a transportId associated with the launched App ID.
+        This is the fix for session ID confusion.
         """
-        siz = unpack(">I", self.s.read(4))[0]  # Read message size (4 bytes, big endian)
-        status = self.s.read(siz)  # Read the actual message content
-        return status
+        start = self._ticks_ms()
+        key = b'"transportId":"'
+
+        while self._ticks_diff(self._ticks_ms(), start) < timeout_ms:
+            try:
+                msg = self.read_message()
+            except OSError:
+                break
+
+            # CRITICAL FIX: Ensure the message is for the Default Media Receiver app
+            if _DEFAULT_MEDIA_APP_ID in msg:
+                i = msg.find(key)
+                if i != -1:
+                    j = msg.find(b'"', i + len(key))
+                    if j != -1:
+                        # transportId found and confirmed to be for the newly launched app
+                        return msg[i + len(key) : j]
+
+        return None
 
     def disconnect(self):
-        """
-        Close the connection to the Chromecast device.
-        """
-        self.s.close()
+        """Close the connection to the Chromecast device."""
+        try:
+            self.s.close()
+        finally:
+            try:
+                self._sock.close()
+            except Exception:
+                pass
+        # Perform garbage collection if running on MicroPython
+        gc.collect()
