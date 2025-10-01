@@ -6,6 +6,7 @@ import machine
 from machine import Pin
 from micropython import const
 import esp32
+import uasyncio as asyncio
 
 _BUFFER_SIZE = const(128)  # Make this big enough for your data
 _NVS_NAME = const("wifi_creds")  # NVS namespace
@@ -145,10 +146,12 @@ async def device_scan(device_found_callback=None):
     client = Client(ip)
     discovery = TXTServiceDiscovery(client)
 
-    # Do one-time query for Chromecasts with longer timeout
+    # Do one-time query for Chromecasts with 10-second timeout
     devices = []
+    print("Starting Chromecast discovery for 10 seconds...")
+
     results = await discovery.query_once("_googlecast", "_tcp", timeout=10.0)
-    
+
     for device in results:
         device_info = {
             "name": device.txt_records["fn"][0],
@@ -156,9 +159,10 @@ async def device_scan(device_found_callback=None):
             "port": device.port,
         }
         devices.append(device_info)
-        
+
         # Send device immediately as it's found (if callback provided)
         if device_found_callback:
             device_found_callback(device_info)
-    
+
+    print(f"Discovery complete, found {len(devices)} devices")
     return devices
