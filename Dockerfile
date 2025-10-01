@@ -3,7 +3,7 @@
 
 # Start with Ubuntu 22.04 and specify platform to ensure consistent builds
 # The 'as builder' allows for potential multi-stage builds if needed later
-FROM --platform=linux/amd64 ubuntu:22.04 as builder
+FROM --platform=linux/amd64 ubuntu:22.04 AS builder
 LABEL Name=esp32-micropython-image-builder Version=1.0.0
 
 # Define versions as build arguments for easy updates without changing the rest of the Dockerfile
