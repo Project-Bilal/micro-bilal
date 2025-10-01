@@ -6,9 +6,6 @@ import utime as time
 import uasyncio as asyncio
 import mqtt
 
-# Firmware version info
-FIRMWARE_VERSION = "1.0"
-
 
 def startup():
     led_toggle()

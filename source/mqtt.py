@@ -8,7 +8,7 @@ import ota.update
 import uasyncio as asyncio
 from ble import run_ble
 import machine
-from main import FIRMWARE_VERSION
+from version import FIRMWARE_VERSION
 
 _PING_INTERVAL = const(10)  # this needs to be less than keepalive
 _KEEPALIVE = const(30)  # Reduced from 120 to 30 seconds for faster offline detection
