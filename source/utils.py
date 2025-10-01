@@ -6,7 +6,6 @@ import machine
 from machine import Pin
 from micropython import const
 import esp32
-import uasyncio as asyncio
 
 _BUFFER_SIZE = const(128)  # Make this big enough for your data
 _NVS_NAME = const("wifi_creds")  # NVS namespace
@@ -135,57 +134,31 @@ def wifi_scan():
     return wifi_list_sorted
 
 
-# Scan for chromecast devices with simulated streaming
+# Scan for chromecast devices
 async def device_scan(device_found_callback=None):
     # Import mDNS client libraries only when needed
     from mdns_client.service_discovery.txt_discovery import TXTServiceDiscovery
     from mdns_client.client import Client
-    import utime as time
 
     wlan = network.WLAN(network.STA_IF)
     ip = wlan.ifconfig()[0]
     client = Client(ip)
     discovery = TXTServiceDiscovery(client)
 
-    # Simulate streaming by doing multiple shorter queries
-    all_devices = []
-    seen_devices = set()  # Track devices we've already sent
-    start_time = time.time()
-    timeout = 10.0  # 10 second total timeout
-    query_interval = 1.0  # Query every 1 second
+    # Do one-time query for Chromecasts with longer timeout
+    devices = []
+    results = await discovery.query_once("_googlecast", "_tcp", timeout=10.0)
     
-    print(f"Starting streaming discovery for {timeout} seconds...")
+    for device in results:
+        device_info = {
+            "name": device.txt_records["fn"][0],
+            "ip": device.ips.pop(),
+            "port": device.port,
+        }
+        devices.append(device_info)
+        
+        # Send device immediately as it's found (if callback provided)
+        if device_found_callback:
+            device_found_callback(device_info)
     
-    while time.time() - start_time < timeout:
-        try:
-            # Do short query to find new devices
-            results = await discovery.query_once("_googlecast", "_tcp", timeout=query_interval)
-            
-            # Process any new devices found
-            for device in results:
-                device_key = f"{device.txt_records['fn'][0]}_{device.ips[0]}"
-                
-                # Only process if we haven't seen this device before
-                if device_key not in seen_devices:
-                    device_info = {
-                        "name": device.txt_records["fn"][0],
-                        "ip": device.ips.pop(),
-                        "port": device.port,
-                    }
-                    all_devices.append(device_info)
-                    seen_devices.add(device_key)
-                    
-                    # Send device immediately as it's found
-                    if device_found_callback:
-                        device_found_callback(device_info)
-                        print(f"Streaming: Found {device_info['name']} at {device_info['ip']}")
-            
-            # Small delay between queries
-            await asyncio.sleep(0.1)
-            
-        except Exception as e:
-            print(f"Query error: {e}")
-            await asyncio.sleep(0.5)
-    
-    print(f"Discovery complete, found {len(all_devices)} total devices")
-    return all_devices
+    return devices
