@@ -108,6 +108,23 @@ class MQTTHandler(object):
         if action == "update":
             url = props.get("url")
             if url:
+                print(f"Starting OTA update from: {url}")
+
+                # Disconnect from MQTT to free up network resources
+                print("Disconnecting from MQTT for OTA update...")
+                try:
+                    if self.connected and self.mqtt:
+                        self.mqtt.disconnect()
+                        self.connected = False
+                        print("MQTT disconnected successfully")
+                except Exception as e:
+                    print(f"Error disconnecting MQTT: {e}")
+
+                # Small delay to ensure disconnection is complete
+                time.sleep(1)
+
+                # Start OTA update
+                print("Starting firmware download and flash...")
                 ota.update.from_file(url=url, reboot=True)
 
         if action == "ble":
