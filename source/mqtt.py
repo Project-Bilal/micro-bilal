@@ -8,6 +8,7 @@ import ota.update
 import uasyncio as asyncio
 from ble import run_ble
 import machine
+from main import FIRMWARE_VERSION
 
 _PING_INTERVAL = const(10)  # this needs to be less than keepalive
 _KEEPALIVE = const(30)  # Reduced from 120 to 30 seconds for faster offline detection
@@ -52,10 +53,15 @@ class MQTTHandler(object):
         return True
 
     def send_status_update(self, status):
-        """Send status update to the status topic"""
+        """Send status update to the status topic with firmware info"""
         try:
-            self.mqtt.publish(self.lwt_topic, status)
-            print(f"Status update sent: {status}")
+            message = {
+                "status": status,
+                "timestamp": time.time(),
+                "firmware_version": FIRMWARE_VERSION,
+            }
+            self.mqtt.publish(self.lwt_topic, json.dumps(message))
+            print(f"Status update sent: {status} (firmware: {FIRMWARE_VERSION})")
         except Exception as e:
             print(f"Failed to send status update: {e}")
 
@@ -107,7 +113,7 @@ class MQTTHandler(object):
 
             try:
                 print("Starting Chromecast discovery...")
-                
+
                 # Create callback to send devices as they're found
                 def send_device_found(device_info):
                     message = {"chromecasts": [device_info]}
@@ -115,18 +121,23 @@ class MQTTHandler(object):
                     print(f"Found device: {device_info['name']} at {device_info['ip']}")
 
                 # Run device scan with streaming callback
-                devices = asyncio.run(device_scan(device_found_callback=send_device_found))
-                
+                devices = asyncio.run(
+                    device_scan(device_found_callback=send_device_found)
+                )
+
                 # Send final summary
                 if len(devices) > 1:
-                    summary_message = {"discovery_complete": True, "total_found": len(devices)}
+                    summary_message = {
+                        "discovery_complete": True,
+                        "total_found": len(devices),
+                    }
                     self.mqtt.publish(topic, json.dumps(summary_message))
                     print(f"Discovery completed, found {len(devices)} devices total")
                 elif len(devices) == 0:
                     no_devices_message = {"chromecasts": []}
                     self.mqtt.publish(topic, json.dumps(no_devices_message))
                     print("Discovery completed, no devices found")
-                    
+
             except Exception as e:
                 error_response = {"error": str(e)}
                 self.mqtt.publish(topic, json.dumps(error_response))
