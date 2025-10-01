@@ -146,23 +146,36 @@ class MQTTHandler(object):
                 print(f"Failed to delete WiFi credentials: {e}")
 
     def play(self, url, ip, port, vol):
+        device = None
         try:
-            print(f"MQTT: Playing audio - URL: {url}, IP: {ip}, Port: {port}, Vol: {vol}")
-            
-            # Create Chromecast connection and play audio
+            print(
+                f"MQTT: Playing audio - URL: {url}, IP: {ip}, Port: {port}, Vol: {vol}"
+            )
+
+            # Create single Chromecast connection
             device = Chromecast(ip, port)
+            
+            # Perform all operations on the single connection
             device.set_volume(vol)
             device.play_url(url)
-            
+
             # Wait for audio to start before disconnecting
             time.sleep(2)
-            device.disconnect()
             print("MQTT: Audio playback completed successfully")
 
         except Exception as e:
             print(f"MQTT: Chromecast error: {e}")
             import sys
             sys.print_exception(e)
+            
+        finally:
+            # Always disconnect to clean up resources
+            if device:
+                try:
+                    device.disconnect()
+                    print("MQTT: Chromecast connection closed")
+                except Exception as disconnect_e:
+                    print(f"MQTT: Error during disconnect: {disconnect_e}")
 
     def mqtt_run(self):
         print("Connected and listening to MQTT Broker")
