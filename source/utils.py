@@ -135,7 +135,7 @@ def wifi_scan():
 
 
 # Scan for chromecast devices
-async def device_scan():
+async def device_scan(device_found_callback=None):
     # Import mDNS client libraries only when needed
     from mdns_client.service_discovery.txt_discovery import TXTServiceDiscovery
     from mdns_client.client import Client
@@ -145,15 +145,20 @@ async def device_scan():
     client = Client(ip)
     discovery = TXTServiceDiscovery(client)
 
-    # Do one-time query for Chromecasts
+    # Do one-time query for Chromecasts with longer timeout
     devices = []
-    results = await discovery.query_once("_googlecast", "_tcp", timeout=5.0)
+    results = await discovery.query_once("_googlecast", "_tcp", timeout=10.0)
+    
     for device in results:
-        devices.append(
-            {
-                "name": device.txt_records["fn"][0],
-                "ip": device.ips.pop(),
-                "port": device.port,
-            }
-        )
+        device_info = {
+            "name": device.txt_records["fn"][0],
+            "ip": device.ips.pop(),
+            "port": device.port,
+        }
+        devices.append(device_info)
+        
+        # Send device immediately as it's found (if callback provided)
+        if device_found_callback:
+            device_found_callback(device_info)
+    
     return devices

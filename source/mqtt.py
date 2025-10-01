@@ -106,11 +106,27 @@ class MQTTHandler(object):
             from utils import device_scan
 
             try:
-                # Run device scan asynchronously
-                devices = asyncio.run(device_scan())
-                message = {"chromecasts": devices}
-                self.mqtt.publish(topic, json.dumps(message))
-                print(f"Discovery completed, found {len(devices)} devices")
+                print("Starting Chromecast discovery...")
+                
+                # Create callback to send devices as they're found
+                def send_device_found(device_info):
+                    message = {"chromecasts": [device_info]}
+                    self.mqtt.publish(topic, json.dumps(message))
+                    print(f"Found device: {device_info['name']} at {device_info['ip']}")
+
+                # Run device scan with streaming callback
+                devices = asyncio.run(device_scan(device_found_callback=send_device_found))
+                
+                # Send final summary
+                if len(devices) > 1:
+                    summary_message = {"discovery_complete": True, "total_found": len(devices)}
+                    self.mqtt.publish(topic, json.dumps(summary_message))
+                    print(f"Discovery completed, found {len(devices)} devices total")
+                elif len(devices) == 0:
+                    no_devices_message = {"chromecasts": []}
+                    self.mqtt.publish(topic, json.dumps(no_devices_message))
+                    print("Discovery completed, no devices found")
+                    
             except Exception as e:
                 error_response = {"error": str(e)}
                 self.mqtt.publish(topic, json.dumps(error_response))
