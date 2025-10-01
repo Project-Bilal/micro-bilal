@@ -22,7 +22,13 @@ class MQTTHandler(object):
         self.id = id
         self.connected = False
         self.lwt_topic = f"projectbilal/{self.id}/status"
-        self.lwt_message = "offline"
+        self.lwt_message = json.dumps(
+            {
+                "status": "offline",
+                "timestamp": time.time(),
+                "firmware_version": FIRMWARE_VERSION,
+            }
+        )
 
     def mqtt_connect(self):
         self.mqtt = MQTTClient(
