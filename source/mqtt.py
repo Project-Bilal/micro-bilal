@@ -91,7 +91,6 @@ class MQTTHandler(object):
             if all([url, ip, port, volume]):
                 # Clean up the IP string (remove whitespace/newlines)
                 ip = str(ip).strip()
-                print(f"MQTT: Cleaned IP: '{ip}'")
                 self.play(url=url, ip=ip, port=port, vol=volume)
 
         if action == "update":
@@ -154,7 +153,7 @@ class MQTTHandler(object):
 
             # Create single Chromecast connection
             device = Chromecast(ip, port)
-            
+
             # Perform all operations on the single connection
             device.set_volume(vol)
             device.play_url(url)
@@ -166,8 +165,9 @@ class MQTTHandler(object):
         except Exception as e:
             print(f"MQTT: Chromecast error: {e}")
             import sys
+
             sys.print_exception(e)
-            
+
         finally:
             # Always disconnect to clean up resources
             if device:
