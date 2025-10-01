@@ -1,4 +1,4 @@
-import socket
+import usocket as socket
 import ssl
 import time
 from struct import pack, unpack
@@ -69,10 +69,7 @@ class Chromecast(object):
     def __init__(self, cast_ip, cast_port, timeout_s=5):
         self.ip = cast_ip
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        try:
-            self._sock.settimeout(timeout_s)
-        except Exception:
-            pass
+        self._sock.settimeout(timeout_s)
 
         # Connect and wrap socket with SSL
         self._sock.connect((self.ip, cast_port))

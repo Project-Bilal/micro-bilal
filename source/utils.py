@@ -7,13 +7,11 @@ from machine import Pin
 from micropython import const
 import esp32
 from umqtt.robust import MQTTClient
-from mdns_client.service_discovery.txt_discovery import TXTServiceDiscovery
-from mdns_client.client import Client
 
 _BUFFER_SIZE = const(128)  # Make this big enough for your data
 _NVS_NAME = const("wifi_creds")  # NVS namespace
 
-_WIFI_TIMEOUT = const(15)  # WiFi connection timeout in seconds
+_WIFI_TIMEOUT = const(30)  # WiFi connection timeout in seconds
 
 _LED_PIN = const(2)  # For the ESP32 built-in LED
 _BLINK_DELAY = const(0.25)  # Blink delay in seconds
@@ -139,6 +137,10 @@ def wifi_scan():
 
 # Scan for chromecast devices
 async def device_scan():
+    # Import mDNS client libraries only when needed
+    from mdns_client.service_discovery.txt_discovery import TXTServiceDiscovery
+    from mdns_client.client import Client
+
     wlan = network.WLAN(network.STA_IF)
     ip = wlan.ifconfig()[0]
     client = Client(ip)

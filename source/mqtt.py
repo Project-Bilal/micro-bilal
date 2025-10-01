@@ -1,6 +1,6 @@
 from umqtt.simple import MQTTClient
 from utils import led_toggle
-import cast
+from cast import Chromecast
 import utime as time
 import json
 from micropython import const
@@ -89,6 +89,9 @@ class MQTTHandler(object):
             volume = props.get("volume")
 
             if all([url, ip, port, volume]):
+                # Clean up the IP string (remove whitespace/newlines)
+                ip = str(ip).strip()
+                print(f"MQTT: Cleaned IP: '{ip}'")
                 self.play(url=url, ip=ip, port=port, vol=volume)
 
         if action == "update":
@@ -143,15 +146,23 @@ class MQTTHandler(object):
                 print(f"Failed to delete WiFi credentials: {e}")
 
     def play(self, url, ip, port, vol):
-        # Handle volume
-        device = cast.Chromecast(ip, port)
-        device.set_volume(vol)
-        device.disconnect()
+        try:
+            print(f"MQTT: Playing audio - URL: {url}, IP: {ip}, Port: {port}, Vol: {vol}")
+            
+            # Create Chromecast connection and play audio
+            device = Chromecast(ip, port)
+            device.set_volume(vol)
+            device.play_url(url)
+            
+            # Wait for audio to start before disconnecting
+            time.sleep(2)
+            device.disconnect()
+            print("MQTT: Audio playback completed successfully")
 
-        # Handle casting
-        device = cast.Chromecast(ip, port)
-        device.play_url(url)
-        device.disconnect()
+        except Exception as e:
+            print(f"MQTT: Chromecast error: {e}")
+            import sys
+            sys.print_exception(e)
 
     def mqtt_run(self):
         print("Connected and listening to MQTT Broker")
