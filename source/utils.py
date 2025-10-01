@@ -103,7 +103,6 @@ def set_wifi(SSID, SECURITY, PASSWORD=None):
         return False
 
 
-# Scan for available wifi
 def wifi_scan():
     try:
         wlan = network.WLAN(network.STA_IF)
@@ -111,22 +110,30 @@ def wifi_scan():
         wlan.disconnect()
         time.sleep(1)
         networks = wlan.scan()
-        wifi_list = []
+
+        wifi_dict = {}
         for wifi_network in networks:
-            ssid = wifi_network[0]  # Network name (SSID)
-            rssi = wifi_network[3]  # Signal strength (RSSI)
+            ssid = (
+                wifi_network[0].decode("utf-8")
+                if isinstance(wifi_network[0], bytes)
+                else wifi_network[0]
+            )
+            rssi = wifi_network[3]  # Signal strength
             security = wifi_network[4]
-            if ssid and (security != 1):
-                wifi_list.append(
-                    (ssid, rssi, security)
-                )  # Append the SSID and RSSI to the list
 
-        # Sort networks by signal strength (RSSI) in descending order
-        wifi_list_sorted = sorted(wifi_list, key=lambda x: x[1], reverse=True)
+            if ssid and (security != 1):  # skip empty / open
+                # Keep only the strongest signal per SSID
+                if ssid not in wifi_dict or rssi > wifi_dict[ssid][1]:
+                    wifi_dict[ssid] = (ssid, rssi, security)
+                    print(repr(ssid))
 
-        # return list of wifi networks with their names and security
+        # Convert dict back to list and sort
+        wifi_list_sorted = sorted(wifi_dict.values(), key=lambda x: x[1], reverse=True)
+
     except Exception as e:
         print("An error occurred:", e)
+        wifi_list_sorted = []
+
     return wifi_list_sorted
 
 
