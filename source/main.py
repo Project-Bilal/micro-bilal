@@ -18,6 +18,10 @@ def startup():
 
 
 def main():
+    import ota.status
+
+    ota.status.status()
+
     wifi_success = startup()
     if wifi_success:
         client = mqtt.MQTTHandler(get_mac())
