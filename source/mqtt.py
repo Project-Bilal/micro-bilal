@@ -171,6 +171,10 @@ class MQTTHandler(object):
             failed_files = []
 
             for filename in files:
+                # Define paths at the start of the loop to avoid scope issues
+                backup_path = "/" + filename + ".bak"
+                file_path = "/" + filename
+                
                 try:
                     print(f"Downloading {filename}...")
                     file_url = base_url + filename
@@ -186,8 +190,6 @@ class MQTTHandler(object):
                     r.close()
 
                     # Backup existing file
-                    backup_path = "/" + filename + ".bak"
-                    file_path = "/" + filename
                     try:
                         os.rename(file_path, backup_path)
                         print(f"Backed up {filename}")
