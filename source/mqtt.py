@@ -356,7 +356,7 @@ class MQTTHandler(object):
             try:
                 time.sleep(1)
                 self.mqtt.check_msg()
-                
+
                 # Check if reboot was requested during message handling
                 if self.reboot_requested:
                     print("Executing requested reboot...")
