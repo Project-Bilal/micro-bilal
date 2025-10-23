@@ -133,9 +133,9 @@ RUN cd ${MICROPYTHON}/ports/esp32 && \
     echo "CONFIG_ESP_TASK_WDT_PANIC=y" >> boards/ESP32_GENERIC/sdkconfig.ota && \
     echo "CONFIG_ESP_SYSTEM_PANIC=ESP_SYSTEM_PANIC_PRINT_REBOOT" >> boards/ESP32_GENERIC/sdkconfig.ota
 
-# Copy application source files into the MicroPython modules directory
+# Copy only OTA library into frozen modules
+# Application files (main.py, mqtt.py, etc.) will be uploaded to filesystem separately
 # chmod 644 ensures files are readable but not executable
-COPY --chmod=644 source/ ${MICROPYTHON}/ports/esp32/modules/
 COPY --chmod=644 ota/ ${MICROPYTHON}/ports/esp32/modules/ota/
 
 # Set the ESP32 port directory as working directory for the build
