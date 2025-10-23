@@ -234,7 +234,9 @@ class MQTTHandler(object):
             if updated_files:
                 print("Rebooting with updated files...")
                 time.sleep(2)
-                machine.reset()
+                # Use os._exit(0) instead of machine.reset() to force immediate termination
+                # This prevents the exception from being caught by mqtt_run's exception handler
+                os._exit(0)
             else:
                 print("No files were updated. Reconnecting to MQTT...")
                 # Reconnect to MQTT
