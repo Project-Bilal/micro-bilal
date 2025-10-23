@@ -174,7 +174,7 @@ class MQTTHandler(object):
                 # Define paths at the start of the loop to avoid scope issues
                 backup_path = "/" + filename + ".bak"
                 file_path = "/" + filename
-                
+
                 try:
                     print(f"Downloading {filename}...")
                     file_url = base_url + filename
