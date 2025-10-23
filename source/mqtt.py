@@ -21,6 +21,7 @@ class MQTTHandler(object):
         self.mqtt = None
         self.id = id
         self.connected = False
+        self.reboot_requested = False
         self.lwt_topic = f"projectbilal/{self.id}/status"
         self.lwt_message = json.dumps(
             {
@@ -233,12 +234,9 @@ class MQTTHandler(object):
 
             if updated_files:
                 print("Rebooting with updated files...")
-                time.sleep(2)
-                # sys.exit() raises SystemExit (BaseException, not Exception)
-                # This won't be caught by mqtt_run's "except Exception" handler
-                # The uncaught exception will crash the program and trigger watchdog reboot
-                import sys
-                sys.exit()
+                print("Reboot will occur after returning from callback...")
+                self.reboot_requested = True
+                return  # Exit callback cleanly, reboot will happen in mqtt_run
             else:
                 print("No files were updated. Reconnecting to MQTT...")
                 # Reconnect to MQTT
@@ -358,6 +356,12 @@ class MQTTHandler(object):
             try:
                 time.sleep(1)
                 self.mqtt.check_msg()
+                
+                # Check if reboot was requested during message handling
+                if self.reboot_requested:
+                    print("Executing requested reboot...")
+                    time.sleep(1)
+                    machine.reset()
 
                 counter += 1
                 if counter >= _PING_INTERVAL:
