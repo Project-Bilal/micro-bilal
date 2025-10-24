@@ -137,7 +137,7 @@ class MQTTHandler(object):
                 "action": "update_app",
                 "props": {
                     "files": ["mqtt.py", "utils.py"],
-                    "url": "http://34.53.103.114/app/"
+                    "url": "http://your-server.com/app/"
                 }
             }
             """
@@ -204,7 +204,7 @@ class MQTTHandler(object):
 
                     print(f"Updated {filename} ({len(content)} bytes)")
                     updated_files.append(filename)
-                    
+
                     # Cleanup and delay between files to prevent network issues
                     gc.collect()  # Free up memory
                     time.sleep(0.5)  # Let network settle
