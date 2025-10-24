@@ -2,9 +2,9 @@ name: Deploy App Files to Server
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
     paths:
-      - 'source/**'
+      - "source/**"
 
 jobs:
   deploy:
@@ -12,7 +12,7 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-      
+
       - name: Copy files via SCP
         uses: appleboy/scp-action@master
         with:
@@ -22,7 +22,7 @@ jobs:
           source: "source/*.py"
           target: "/var/www/html/app/"
           strip_components: 1
-      
+
       - name: Set permissions
         uses: appleboy/ssh-action@master
         with:
@@ -32,4 +32,3 @@ jobs:
           script: |
             chmod 644 /var/www/html/app/*.py
             chown www-data:www-data /var/www/html/app/*.py
-
