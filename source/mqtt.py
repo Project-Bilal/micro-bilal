@@ -169,14 +169,12 @@ class MQTTHandler(object):
             import os
             import gc
 
-            updated_files = []
+            # Phase 1: Download ALL files first (atomic - all or nothing)
+            print("Phase 1: Downloading all files...")
+            downloaded_files = {}  # filename -> content
             failed_files = []
 
             for filename in files:
-                # Define paths at the start of the loop to avoid scope issues
-                backup_path = "/" + filename + ".bak"
-                file_path = "/" + filename
-
                 try:
                     print(f"Downloading {filename}...")
                     file_url = base_url + filename
@@ -186,11 +184,45 @@ class MQTTHandler(object):
                         print(f"Failed to download {filename}: HTTP {r.status_code}")
                         failed_files.append(filename)
                         r.close()
-                        continue
+                        break  # Abort on first failure
 
                     content = r.content
                     r.close()
+                    
+                    downloaded_files[filename] = content
+                    print(f"Downloaded {filename} ({len(content)} bytes)")
+                    
+                    # Cleanup and delay between downloads
+                    gc.collect()
+                    time.sleep(0.5)
 
+                except Exception as e:
+                    print(f"Error downloading {filename}: {e}")
+                    failed_files.append(filename)
+                    break  # Abort on first failure
+
+            # Check if all downloads succeeded
+            if failed_files:
+                print("=" * 40)
+                print("Download failed - aborting update")
+                print(f"  Failed: {failed_files}")
+                print("  No files were modified")
+                print("=" * 40)
+                print("Reconnecting to MQTT...")
+                from utils import wifi_connect
+                wifi_connect()
+                self.mqtt_connect()
+                return
+
+            # Phase 2: All downloads succeeded - now write files
+            print("Phase 2: Writing files to filesystem...")
+            updated_files = []
+            
+            for filename, content in downloaded_files.items():
+                backup_path = "/" + filename + ".bak"
+                file_path = "/" + filename
+                
+                try:
                     # Backup existing file
                     try:
                         os.rename(file_path, backup_path)
@@ -202,23 +234,15 @@ class MQTTHandler(object):
                     with open(file_path, "wb") as f:
                         f.write(content)
 
-                    print(f"Updated {filename} ({len(content)} bytes)")
+                    print(f"Wrote {filename}")
                     updated_files.append(filename)
 
-                    # Cleanup and delay between files to prevent network issues
-                    gc.collect()  # Free up memory
-                    time.sleep(0.5)  # Let network settle
-
                 except Exception as e:
-                    print(f"Error updating {filename}: {e}")
-                    failed_files.append(filename)
-
-                    # Try to restore backup
+                    print(f"Error writing {filename}: {e}")
+                    # This shouldn't happen, but if it does, try to restore
                     try:
-                        if os.stat(backup_path):
-                            os.remove(file_path)
-                            os.rename(backup_path, file_path)
-                            print(f"Restored backup for {filename}")
+                        os.rename(backup_path, file_path)
+                        print(f"Restored backup for {filename}")
                     except:
                         pass
 
@@ -232,9 +256,8 @@ class MQTTHandler(object):
 
             # Report results
             print("=" * 40)
-            print("App update complete")
+            print("App update complete - all files updated successfully")
             print(f"  Updated: {updated_files}")
-            print(f"  Failed: {failed_files}")
             print("=" * 40)
 
             if updated_files:
