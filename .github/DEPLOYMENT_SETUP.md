@@ -24,10 +24,12 @@ Go to your GitHub repo: https://github.com/Project-Bilal/micro-bilal/settings/se
 Click **"New repository secret"** and add these two secrets:
 
 ### Secret 1: `SERVER_SSH_KEY`
+
 - Name: `SERVER_SSH_KEY`
 - Value: Paste the **entire private key** from Step 1
 
 ### Secret 2: `SERVER_USERNAME`
+
 - Name: `SERVER_USERNAME`
 - Value: Your server username (probably `root` or your user)
 
@@ -53,8 +55,8 @@ sudo chmod 755 /var/www/html/app
 ## Troubleshooting
 
 If deployment fails:
+
 - Check GitHub Actions logs for errors
 - Verify SSH key is correct in secrets
 - Ensure server user has write permissions to `/var/www/html/app/`
 - Test SSH connection manually: `ssh -i ~/.ssh/github_actions_deploy user@34.53.103.114`
-
