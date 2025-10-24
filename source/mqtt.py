@@ -136,7 +136,7 @@ class MQTTHandler(object):
             {
                 "action": "update_app",
                 "props": {
-                    "files": ["mqtt.py", "utils.py"],
+                    "files": ["mqtt.py", "utils.py"],  // or ["*"] or ["all"] for all files
                     "url": "http://your-server.com/app/"
                 }
             }
@@ -147,6 +147,11 @@ class MQTTHandler(object):
             if not files:
                 print("ERROR: No files specified for app update")
                 return
+
+            # Handle "update all" shortcut
+            if files == ["*"] or files == ["all"]:
+                files = ["main.py", "mqtt.py", "utils.py", "cast.py", "ble.py", "version.py"]
+                print("Update all files requested - will download all app files")
 
             if not base_url:
                 print("ERROR: No URL specified for app update")
