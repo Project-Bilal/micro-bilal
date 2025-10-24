@@ -20,15 +20,18 @@ jobs:
           username: ${{ secrets.SERVER_USERNAME }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           source: "source/*.py"
-          target: "/var/www/html/app/"
+          target: "~/micro-bilal-deploy/"
           strip_components: 1
 
-      - name: Set permissions
+      - name: Move files and set permissions
         uses: appleboy/ssh-action@master
         with:
           host: 34.53.103.114
           username: ${{ secrets.SERVER_USERNAME }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
-            chmod 644 /var/www/html/app/*.py
-            chown www-data:www-data /var/www/html/app/*.py
+            sudo mkdir -p /var/www/html/app
+            sudo cp ~/micro-bilal-deploy/*.py /var/www/html/app/
+            sudo chmod 644 /var/www/html/app/*.py
+            sudo chown www-data:www-data /var/www/html/app/*.py
+            rm -rf ~/micro-bilal-deploy
