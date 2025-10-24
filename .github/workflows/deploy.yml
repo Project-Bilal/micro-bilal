@@ -46,12 +46,12 @@ jobs:
             sudo cp ~/micro-bilal-deploy/app/*.py /var/www/html/app/
             sudo chmod 644 /var/www/html/app/*.py
             sudo chown www-data:www-data /var/www/html/app/*.py
-            
+
             # Deploy firmware files
             sudo mkdir -p /var/www/html/firmware
             sudo cp ~/micro-bilal-deploy/firmware/*.bin /var/www/html/firmware/
             sudo chmod 644 /var/www/html/firmware/*.bin
             sudo chown www-data:www-data /var/www/html/firmware/*.bin
-            
+
             # Cleanup temp directory
             rm -rf ~/micro-bilal-deploy
