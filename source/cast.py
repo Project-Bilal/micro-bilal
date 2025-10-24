@@ -157,7 +157,12 @@ class Chromecast(object):
         else:
             url_b = url
 
-        # 1. Launch the Default Media Receiver app
+        # 1. Set volume on base receiver (before launching app)
+        if volume is not None:
+            self.set_volume(volume)
+            print(f"Volume set to {volume} on base receiver")
+
+        # 2. Launch the Default Media Receiver app
         self._send(
             _frame(
                 _NS_RECV,
@@ -167,19 +172,19 @@ class Chromecast(object):
             )
         )
 
-        # 2. Wait for the new session's transport ID
+        # 3. Wait for the new session's transport ID
         transport_id = self._wait_for_transport_id(timeout_ms=5000)
         if not transport_id:
             print("Error: Failed to get transport ID for new session.")
             return False
 
-        # 3. Connect to the specific media session transport
+        # 4. Connect to the specific media session transport
         self._send(_frame(_NS_CONN, b'{"type":"CONNECT"}', dest=transport_id))
         self._send(
             _frame(_NS_MEDIA, b'{"type":"GET_STATUS","requestId":4}', dest=transport_id)
         )
 
-        # 4. Construct and send the LOAD command
+        # 5. Construct and send the LOAD command
         load_payload = (
             b'{"media":{"contentId":"'
             + url_b
@@ -195,7 +200,7 @@ class Chromecast(object):
         )
         self._send(_frame(_NS_MEDIA, load_payload, dest=transport_id))
 
-        # 5. Check for successful MEDIA_STATUS response
+        # 6. Check for successful MEDIA_STATUS response
         for _ in range(6):
             try:
                 status = self.read_message()
@@ -203,10 +208,6 @@ class Chromecast(object):
                 break
             # Look for the MEDIA_STATUS type and the custom title to confirm load
             if b'"type":"MEDIA_STATUS"' in status and b'"Bilal Cast"' in status:
-                # 6. Set volume after media is loaded (if specified)
-                if volume is not None:
-                    self.set_volume(volume)
-                    print(f"Volume set to {volume} after media loaded")
                 return True
 
         return False
