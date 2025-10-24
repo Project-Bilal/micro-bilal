@@ -150,7 +150,14 @@ class MQTTHandler(object):
 
             # Handle "update all" shortcut
             if files == ["*"] or files == ["all"]:
-                files = ["main.py", "mqtt.py", "utils.py", "cast.py", "ble.py", "version.py"]
+                files = [
+                    "main.py",
+                    "mqtt.py",
+                    "utils.py",
+                    "cast.py",
+                    "ble.py",
+                    "version.py",
+                ]
                 print("Update all files requested - will download all app files")
 
             if not base_url:
