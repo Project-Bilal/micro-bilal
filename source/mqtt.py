@@ -167,6 +167,7 @@ class MQTTHandler(object):
             # Import dependencies
             import urequests
             import os
+            import gc
 
             updated_files = []
             failed_files = []
@@ -203,6 +204,10 @@ class MQTTHandler(object):
 
                     print(f"Updated {filename} ({len(content)} bytes)")
                     updated_files.append(filename)
+                    
+                    # Cleanup and delay between files to prevent network issues
+                    gc.collect()  # Free up memory
+                    time.sleep(0.5)  # Let network settle
 
                 except Exception as e:
                     print(f"Error updating {filename}: {e}")
