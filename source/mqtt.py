@@ -363,9 +363,8 @@ class MQTTHandler(object):
             # Create single Chromecast connection
             device = Chromecast(ip, port)
 
-            # Perform all operations on the single connection
-            device.set_volume(vol)
-            device.play_url(url)
+            # Play URL with volume (volume is set after media loads)
+            device.play_url(url, volume=vol)
 
             # Wait for audio to start before disconnecting
             time.sleep(2)

@@ -145,8 +145,13 @@ class Chromecast(object):
         )
         self._send(_frame(_NS_RECV, payload, dest=_RECV))
 
-    def play_url(self, url):
-        """Play audio from specified URL on the Chromecast."""
+    def play_url(self, url, volume=None):
+        """Play audio from specified URL on the Chromecast.
+
+        Args:
+            url: The media URL to play
+            volume: Optional volume level (0.0 to 1.0). If None, volume is not changed.
+        """
         if isinstance(url, str):
             url_b = url.encode()
         else:
@@ -198,6 +203,10 @@ class Chromecast(object):
                 break
             # Look for the MEDIA_STATUS type and the custom title to confirm load
             if b'"type":"MEDIA_STATUS"' in status and b'"Bilal Cast"' in status:
+                # 6. Set volume after media is loaded (if specified)
+                if volume is not None:
+                    self.set_volume(volume)
+                    print(f"Volume set to {volume} after media loaded")
                 return True
 
         return False
