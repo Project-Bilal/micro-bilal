@@ -1,0 +1,35 @@
+name: Deploy App Files to Server
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'source/**'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Copy files via SCP
+        uses: appleboy/scp-action@master
+        with:
+          host: 34.53.103.114
+          username: ${{ secrets.SERVER_USERNAME }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          source: "source/*.py"
+          target: "/var/www/html/app/"
+          strip_components: 1
+      
+      - name: Set permissions
+        uses: appleboy/ssh-action@master
+        with:
+          host: 34.53.103.114
+          username: ${{ secrets.SERVER_USERNAME }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            chmod 644 /var/www/html/app/*.py
+            chown www-data:www-data /var/www/html/app/*.py
+
