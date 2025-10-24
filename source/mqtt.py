@@ -188,10 +188,10 @@ class MQTTHandler(object):
 
                     content = r.content
                     r.close()
-                    
+
                     downloaded_files[filename] = content
                     print(f"Downloaded {filename} ({len(content)} bytes)")
-                    
+
                     # Cleanup and delay between downloads
                     gc.collect()
                     time.sleep(0.5)
@@ -210,6 +210,7 @@ class MQTTHandler(object):
                 print("=" * 40)
                 print("Reconnecting to MQTT...")
                 from utils import wifi_connect
+
                 wifi_connect()
                 self.mqtt_connect()
                 return
@@ -217,11 +218,11 @@ class MQTTHandler(object):
             # Phase 2: All downloads succeeded - now write files
             print("Phase 2: Writing files to filesystem...")
             updated_files = []
-            
+
             for filename, content in downloaded_files.items():
                 backup_path = "/" + filename + ".bak"
                 file_path = "/" + filename
-                
+
                 try:
                     # Backup existing file
                     try:
