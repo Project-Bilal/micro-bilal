@@ -7,3 +7,6 @@ output/
 flash.sh
 flash_production.sh
 PRODUCTION_SETUP.md
+package_flash_kit.sh
+flash_kit/
+flash_kit.zip
