@@ -340,7 +340,7 @@ class MQTTHandler(object):
                 self.mqtt.publish(topic, json.dumps(message))
 
                 # Wait a moment for message to be sent, then reboot
-                time.sleep(1)
+                time.sleep(3)
                 print("Rebooting ESP32...")
                 import machine
 
