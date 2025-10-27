@@ -92,10 +92,11 @@ async def control_task(connection, char):
                     # Inform client of failed configuration
                     # and wait before next attempt
                     print("Failed to connect to WiFi")
-                    
+
                     # Clear the faulty WiFi credentials from NVS
                     try:
                         import esp32
+
                         nvs = esp32.NVS("wifi_creds")
                         nvs.erase_key("PASSWORD")
                         nvs.erase_key("SSID")
@@ -103,7 +104,7 @@ async def control_task(connection, char):
                         print("Cleared faulty WiFi credentials from NVS")
                     except Exception as e:
                         print(f"Error clearing WiFi credentials: {e}")
-                    
+
                     msg = b'{"HEADER":"network_written", "MESSAGE":"fail"}'
                     char.notify(connection, msg)
                     time.sleep(2)
