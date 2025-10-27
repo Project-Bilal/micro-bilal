@@ -409,7 +409,9 @@ class MQTTHandler(object):
 
     def mqtt_run(self):
         print("Connected and listening to MQTT Broker")
-        counter = 0
+        ping_counter = 0
+        heartbeat_counter = 0
+        _HEARTBEAT_INTERVAL = const(10)  # Send "online" status every 10 seconds
 
         while True:
             time.sleep(1)
@@ -422,7 +424,13 @@ class MQTTHandler(object):
                 machine.reset()
 
             # Ping periodically to keep connection alive
-            counter += 1
-            if counter >= _PING_INTERVAL:
-                counter = 0
+            ping_counter += 1
+            if ping_counter >= _PING_INTERVAL:
+                ping_counter = 0
                 self.mqtt.ping()
+
+            # Send heartbeat status update to ensure status is always fresh
+            heartbeat_counter += 1
+            if heartbeat_counter >= _HEARTBEAT_INTERVAL:
+                heartbeat_counter = 0
+                self.send_status_update("online")
