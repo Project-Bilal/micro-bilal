@@ -22,6 +22,7 @@ class MQTTHandler(object):
         self.id = id
         self.connected = False
         self.reboot_requested = False
+        self.discovery_in_progress = False
         self.lwt_topic = f"projectbilal/{self.id}/status"
         self.lwt_message = json.dumps(
             {
@@ -96,12 +97,23 @@ class MQTTHandler(object):
             return
 
         if action == "play":
+            # Wait if discovery is in progress to prevent socket exhaustion
+            if self.discovery_in_progress:
+                print("Waiting for discovery to complete before playing...")
+                max_wait = 15  # Max 15 seconds wait
+                wait_count = 0
+                while self.discovery_in_progress and wait_count < max_wait:
+                    time.sleep(1)
+                    wait_count += 1
+                if self.discovery_in_progress:
+                    print("Discovery still in progress, proceeding anyway")
+
             url = props.get("url")
             ip = props.get("ip")
             port = props.get("port")
             volume = props.get("volume")
 
-            if all([url, ip, port, volume]):
+            if all([url, ip, port]):
                 # Clean up the IP string (remove whitespace/newlines)
                 ip = str(ip).strip()
                 self.play(url=url, ip=ip, port=port, vol=volume)
@@ -292,7 +304,9 @@ class MQTTHandler(object):
         if action == "discover":
             # Import device_scan here to avoid circular imports
             from utils import device_scan
+            import gc
 
+            self.discovery_in_progress = True
             try:
                 print("Starting Chromecast discovery...")
 
@@ -324,6 +338,10 @@ class MQTTHandler(object):
                 error_response = {"error": str(e)}
                 self.mqtt.publish(topic, json.dumps(error_response))
                 print(f"Discovery failed: {e}")
+            finally:
+                self.discovery_in_progress = False
+                gc.collect()
+                print("Discovery resources cleaned up")
 
         if action == "delete_device":
             try:
