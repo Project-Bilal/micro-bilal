@@ -306,6 +306,10 @@ class MQTTHandler(object):
             from utils import device_scan
             import gc
 
+            # Send keepalive ping before starting long-running discovery
+            # This prevents false "offline" status during the 10-second scan
+            self.mqtt.ping()
+
             self.discovery_in_progress = True
             try:
                 print("Starting Chromecast discovery...")
