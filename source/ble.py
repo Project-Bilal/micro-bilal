@@ -42,6 +42,11 @@ async def control_task(connection, char):
         char: BLE characteristic for communication
     """
     try:
+        # Wait after BLE connection to allow WiFi radio to settle
+        # This prevents "0 networks" issue on rapid reconnections
+        await asyncio.sleep(2)
+        print("BLE: Connection settled, ready for commands")
+        
         with connection.timeout(None):  # No timeout for connection
             while True:
                 # Wait for data to be written to characteristic
