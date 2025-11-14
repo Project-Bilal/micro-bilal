@@ -53,7 +53,9 @@ async def control_task(connection, char):
 
                 # Handle WiFi scanning request
                 if header == "wifiList":
+                    print("BLE: Received wifiList request, starting scan...")
                     ssid_list = wifi_scan()  # Scan for available networks
+                    print(f"BLE: Found {len(ssid_list)} networks")
                     # Send start notification
                     msg = b'{"HEADER":"wifiList", "MESSAGE":"start"}'
                     time.sleep(0.5)  # Prevent ESP32 crashes
@@ -78,20 +80,24 @@ async def control_task(connection, char):
                     SSID = data.get("SSID")
                     PASSWORD = data.get("PASSWORD")
                     SECURITY = data.get("SECURITY")
+                    print(f"BLE: Received WiFi credentials for SSID: '{SSID}'")
+                    print(f"BLE: Security type: {SECURITY}")
                     # Save WiFi configuration
                     set_wifi(SSID, SECURITY, PASSWORD)
                     time.sleep(0.5)  # Prevent ESP32 crashes
+                    print(f"BLE: Attempting to connect to '{SSID}'...")
                     ip = wifi_connect()
                     # Confirm successful configuration
                     # then reset device
                     if ip:
+                        print(f"BLE: Successfully connected to '{SSID}' with IP: {ip}")
                         msg = b'{"HEADER":"network_written", "MESSAGE":"success"}'
                         char.notify(connection, msg)
                         time.sleep(2)
                         machine.reset()  # Restart device to apply new WiFi settings
                     # Inform client of failed configuration
                     # and wait before next attempt
-                    print("Failed to connect to WiFi")
+                    print(f"BLE: Failed to connect to '{SSID}'")
 
                     # Clear the faulty WiFi credentials from NVS
                     try:
@@ -112,6 +118,7 @@ async def control_task(connection, char):
     except Exception as e:
         print(f"BLE control_task error: {type(e).__name__}: {repr(e)}")
         import sys
+
         sys.print_exception(e)
     return
 

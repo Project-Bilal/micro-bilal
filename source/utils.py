@@ -66,12 +66,13 @@ def wifi_connect():
     # Make sure we have both SSID and PASS
     if SSID and PASS and SECURITY:
         # Connect to the WiFi network
+        print(f"WiFi: Attempting to connect to SSID: '{SSID}' (Security: {SECURITY})")
         if SECURITY == 0:
             wlan.connect(SSID)
         else:
             wlan.connect(SSID, PASS)
         timeout = _WIFI_TIMEOUT
-        print("connecting to WiFi...")
+        print(f"WiFi: Connecting to '{SSID}'... (timeout: {timeout}s)")
         while not wlan.isconnected() and timeout > 0:
             time.sleep(1)
             timeout -= 1
@@ -79,7 +80,13 @@ def wifi_connect():
         # if we conected return back with the ip
         if wlan.isconnected():
             led_toggle("wifi")
-            return wlan.ifconfig()[0]
+            ip = wlan.ifconfig()[0]
+            print(f"WiFi: Successfully connected to '{SSID}' with IP: {ip}")
+            return ip
+        else:
+            print(
+                f"WiFi: Connection to '{SSID}' timed out after {_WIFI_TIMEOUT} seconds"
+            )
 
     # if connection does not succeed
     return None
@@ -88,16 +95,21 @@ def wifi_connect():
 # save wifi credentials to nvs
 def set_wifi(SSID, SECURITY, PASSWORD=None):
     try:
+        print(f"WiFi: Saving credentials to NVS - SSID: '{SSID}', Security: {SECURITY}")
         nvs = esp32.NVS(_NVS_NAME)
         nvs.set_blob("SSID", SSID)
         nvs.set_i32("SECURITY", SECURITY)
         if PASSWORD:
             nvs.set_blob("PASSWORD", PASSWORD)
+            print(f"WiFi: Password saved (length: {len(PASSWORD)} chars)")
         else:
             nvs.set_blob("PASSWORD", "nopassword")
+            print("WiFi: No password saved (open network)")
         nvs.commit()
+        print("WiFi: Credentials committed to NVS successfully")
         return True
-    except:
+    except Exception as e:
+        print(f"WiFi: Error saving credentials to NVS: {e}")
         return False
 
 
@@ -131,6 +143,7 @@ def wifi_scan():
     except Exception as e:
         print(f"WiFi scan error: {type(e).__name__}: {repr(e)}")
         import sys
+
         sys.print_exception(e)
         wifi_list_sorted = []
 
