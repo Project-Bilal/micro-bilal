@@ -104,9 +104,11 @@ def set_wifi(SSID, SECURITY, PASSWORD=None):
 def wifi_scan():
     try:
         wlan = network.WLAN(network.STA_IF)
-        wlan.active(True)
-        wlan.disconnect()
-        time.sleep(1)
+        # Fully reset WiFi interface to ensure clean state for scanning
+        wlan.active(False)  # Turn OFF first
+        time.sleep(0.5)
+        wlan.active(True)   # Turn back ON
+        time.sleep(1.5)     # Wait for WiFi hardware to initialize
         networks = wlan.scan()
 
         wifi_dict = {}
