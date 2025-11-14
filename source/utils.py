@@ -115,20 +115,41 @@ def set_wifi(SSID, SECURITY, PASSWORD=None):
 
 def wifi_scan():
     wlan = network.WLAN(network.STA_IF)
-
-    # Try up to 3 times with full WiFi reset on each attempt
-    for attempt in range(3):
+    
+    # OPTION 3: Clear any stored credentials to prevent auto-connect during scan
+    try:
+        nvs = esp32.NVS(_NVS_NAME)
+        # Temporarily clear credentials (will be restored when user selects network)
+        nvs.erase_key("SSID")
+        nvs.erase_key("PASSWORD")
+        nvs.erase_key("SECURITY")
+        nvs.commit()
+        print("WiFi: Cleared NVS credentials to prevent auto-connect during scan")
+    except Exception as e:
+        print(f"WiFi: Could not clear NVS (may not exist): {e}")
+    
+    # OPTION 2: Try up to 5 times with full WiFi reset on each attempt
+    for attempt in range(5):
         try:
             if attempt > 0:
                 print(f"WiFi scan retry attempt {attempt + 1}")
-
+            
             # Fully reset WiFi interface to ensure clean state
             wlan.active(False)
             time.sleep(0.5)
             wlan.active(True)
+            
+            # OPTION 1: Explicitly disconnect to prevent auto-connect conflicts
+            wlan.disconnect()
             # Increase delay on retries to allow hardware to stabilize
-            time.sleep(1.5 if attempt == 0 else 2.0)
-
+            time.sleep(1.5 if attempt == 0 else 2.5)
+            
+            # Double-check we're not connected
+            if wlan.isconnected():
+                print("WARNING: Still connected after disconnect, forcing...")
+                wlan.disconnect()
+                time.sleep(1)
+            
             networks = wlan.scan()
 
             # Success! Process the results
@@ -159,10 +180,10 @@ def wifi_scan():
             print(
                 f"WiFi scan error (attempt {attempt + 1}): {type(e).__name__}: {repr(e)}"
             )
-            if attempt < 2:  # Not the last attempt
+            if attempt < 4:  # Not the last attempt (0-3 have more retries)
                 time.sleep(1)  # Wait before retry
             else:  # Last attempt failed
-                print("WiFi scan failed after 3 attempts")
+                print("WiFi scan failed after 5 attempts")
                 import sys
 
                 sys.print_exception(e)
