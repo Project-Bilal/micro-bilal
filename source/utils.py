@@ -104,11 +104,9 @@ def set_wifi(SSID, SECURITY, PASSWORD=None):
 def wifi_scan():
     try:
         wlan = network.WLAN(network.STA_IF)
-        # Fully reset WiFi interface to ensure clean state for scanning
-        wlan.active(False)  # Turn OFF first
-        time.sleep(0.5)
-        wlan.active(True)   # Turn back ON
-        time.sleep(1.5)     # Wait for WiFi hardware to initialize
+        wlan.active(True)
+        wlan.disconnect()
+        time.sleep(1)
         networks = wlan.scan()
 
         wifi_dict = {}
@@ -131,7 +129,9 @@ def wifi_scan():
         wifi_list_sorted = sorted(wifi_dict.values(), key=lambda x: x[1], reverse=True)
 
     except Exception as e:
-        print("An error occurred:", e)
+        print(f"WiFi scan error: {type(e).__name__}: {repr(e)}")
+        import sys
+        sys.print_exception(e)
         wifi_list_sorted = []
 
     return wifi_list_sorted

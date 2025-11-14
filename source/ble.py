@@ -110,7 +110,9 @@ async def control_task(connection, char):
                     time.sleep(2)
 
     except Exception as e:
-        print("An error occurred:", e)
+        print(f"BLE control_task error: {type(e).__name__}: {repr(e)}")
+        import sys
+        sys.print_exception(e)
     return
 
 
