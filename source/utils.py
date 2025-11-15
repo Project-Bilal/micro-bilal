@@ -114,39 +114,25 @@ def set_wifi(SSID, SECURITY, PASSWORD=None):
 
 
 def wifi_scan():
+    """Scan for available WiFi networks with simple retry logic."""
     wlan = network.WLAN(network.STA_IF)
 
-    # Try up to 5 times with full WiFi reset on each attempt
-    for attempt in range(5):
+    # Try up to 3 times on hardware errors only
+    for attempt in range(3):
         try:
             if attempt > 0:
-                print(f"WiFi scan retry attempt {attempt + 1}")
+                print(f"WiFi scan retry {attempt + 1}/3")
+                time.sleep(2)
 
-            # Fully reset WiFi interface to ensure clean state
-            wlan.active(False)
-            time.sleep(0.5)
+            # Simple approach: activate, disconnect, wait, scan
             wlan.active(True)
-
-            # Explicitly disconnect to prevent auto-connect conflicts
             wlan.disconnect()
-            # Increase delay on retries to allow hardware to stabilize
-            time.sleep(1.5 if attempt == 0 else 2.5)
-
-            # Double-check we're not connected
-            if wlan.isconnected():
-                print("WARNING: Still connected after disconnect, forcing...")
-                wlan.disconnect()
-                time.sleep(1)
+            time.sleep(1.5)
 
             networks = wlan.scan()
+            print(f"WiFi: Scan returned {len(networks)} raw networks")
 
-            # If scan returned empty results, treat as failure and retry
-            if len(networks) == 0:
-                raise RuntimeError(
-                    "WiFi scan returned 0 networks - interface may be in bad state"
-                )
-
-            # Success! Process the results
+            # Process results
             wifi_dict = {}
             for wifi_network in networks:
                 ssid = (
@@ -154,35 +140,26 @@ def wifi_scan():
                     if isinstance(wifi_network[0], bytes)
                     else wifi_network[0]
                 )
-                rssi = wifi_network[3]  # Signal strength
+                rssi = wifi_network[3]
                 security = wifi_network[4]
 
                 if ssid and (security != 1):  # skip empty / open
-                    # Keep only the strongest signal per SSID
                     if ssid not in wifi_dict or rssi > wifi_dict[ssid][1]:
                         wifi_dict[ssid] = (ssid, rssi, security)
                         print(repr(ssid))
 
-            # Convert dict back to list and sort
             wifi_list_sorted = sorted(
                 wifi_dict.values(), key=lambda x: x[1], reverse=True
             )
 
-            # Final check - if filtering resulted in 0 networks, retry
-            if len(wifi_list_sorted) == 0:
-                raise RuntimeError("WiFi scan found networks but all were filtered out")
-
-            print(f"WiFi scan successful: found {len(wifi_list_sorted)} networks")
+            print(f"WiFi: Found {len(wifi_list_sorted)} networks after filtering")
             return wifi_list_sorted
 
         except Exception as e:
             print(
                 f"WiFi scan error (attempt {attempt + 1}): {type(e).__name__}: {repr(e)}"
             )
-            if attempt < 4:  # Not the last attempt (0-3 have more retries)
-                time.sleep(1)  # Wait before retry
-            else:  # Last attempt failed
-                print("WiFi scan failed after 5 attempts")
+            if attempt == 2:
                 import sys
 
                 sys.print_exception(e)
