@@ -116,19 +116,7 @@ def set_wifi(SSID, SECURITY, PASSWORD=None):
 def wifi_scan():
     wlan = network.WLAN(network.STA_IF)
 
-    # OPTION 3: Clear any stored credentials to prevent auto-connect during scan
-    try:
-        nvs = esp32.NVS(_NVS_NAME)
-        # Temporarily clear credentials (will be restored when user selects network)
-        nvs.erase_key("SSID")
-        nvs.erase_key("PASSWORD")
-        nvs.erase_key("SECURITY")
-        nvs.commit()
-        print("WiFi: Cleared NVS credentials to prevent auto-connect during scan")
-    except Exception as e:
-        print(f"WiFi: Could not clear NVS (may not exist): {e}")
-
-    # OPTION 2: Try up to 5 times with full WiFi reset on each attempt
+    # Try up to 5 times with full WiFi reset on each attempt
     for attempt in range(5):
         try:
             if attempt > 0:
@@ -139,7 +127,7 @@ def wifi_scan():
             time.sleep(0.5)
             wlan.active(True)
 
-            # OPTION 1: Explicitly disconnect to prevent auto-connect conflicts
+            # Explicitly disconnect to prevent auto-connect conflicts
             wlan.disconnect()
             # Increase delay on retries to allow hardware to stabilize
             time.sleep(1.5 if attempt == 0 else 2.5)
@@ -151,10 +139,12 @@ def wifi_scan():
                 time.sleep(1)
 
             networks = wlan.scan()
-            
+
             # If scan returned empty results, treat as failure and retry
             if len(networks) == 0:
-                raise RuntimeError("WiFi scan returned 0 networks - interface may be in bad state")
+                raise RuntimeError(
+                    "WiFi scan returned 0 networks - interface may be in bad state"
+                )
 
             # Success! Process the results
             wifi_dict = {}
@@ -177,11 +167,11 @@ def wifi_scan():
             wifi_list_sorted = sorted(
                 wifi_dict.values(), key=lambda x: x[1], reverse=True
             )
-            
+
             # Final check - if filtering resulted in 0 networks, retry
             if len(wifi_list_sorted) == 0:
                 raise RuntimeError("WiFi scan found networks but all were filtered out")
-            
+
             print(f"WiFi scan successful: found {len(wifi_list_sorted)} networks")
             return wifi_list_sorted
 
