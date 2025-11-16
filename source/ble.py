@@ -95,20 +95,11 @@ async def control_task(connection, char):
                     # This prevents orphaned devices with bad credentials saved
                     time.sleep(0.5)  # Prevent ESP32 crashes
 
-                    # Reset WiFi radio to ensure clean state for connection attempt
-                    # This is critical for re-onboarding scenarios where previous
-                    # connection state might interfere
-                    print("BLE: Resetting WiFi radio for clean connection attempt...")
-                    wlan = network.WLAN(network.STA_IF)
-                    wlan.disconnect()
-                    wlan.active(False)
-                    time.sleep(0.5)
-                    wlan.active(True)
-                    time.sleep(1)
-
                     print(
                         f"BLE: Testing connection to '{SSID}' (credentials NOT saved yet)..."
                     )
+                    # wifi_connect_with_creds() will handle radio setup
+                    # After a failed connection, it performs full radio reset with proper delays
                     ip = wifi_connect_with_creds(SSID, PASSWORD, SECURITY)
 
                     if ip:
