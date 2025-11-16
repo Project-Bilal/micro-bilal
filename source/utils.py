@@ -15,8 +15,11 @@ _WIFI_TIMEOUT = const(30)  # WiFi connection timeout in seconds
 
 _LED_PIN = const(2)  # For the ESP32 built-in LED
 _BLINK_DELAY = const(0.25)  # Blink delay in seconds
-_BLINK_COUNT = {"wifi": const(6), "mqtt": const(4), "default": const(8)}
+_BLINK_COUNT = {"wifi": const(6), "mqtt": const(4), "default": const(8), "reset": const(10)}
 _LED = Pin(_LED_PIN, Pin.OUT)  # Create single LED instance
+
+_BOOT_BUTTON_PIN = const(0)  # Built-in BOOT button on ESP32
+_RESET_HOLD_TIME = const(8)  # Seconds to hold button for factory reset
 
 
 def led_toggle(info=None):
@@ -48,12 +51,12 @@ def wifi_connect_with_creds(SSID, PASSWORD, SECURITY):
     """
     Test WiFi connection with provided credentials without saving to NVS.
     Used during onboarding to verify credentials before persisting them.
-    
+
     Args:
         SSID: WiFi network name
         PASSWORD: WiFi password (can be None for open networks)
         SECURITY: Security type (0 for open, non-zero for secured)
-    
+
     Returns:
         IP address string if connected, None if failed
     """
@@ -77,7 +80,7 @@ def wifi_connect_with_creds(SSID, PASSWORD, SECURITY):
             print("WiFi: Password required for secured network")
             return None
         wlan.connect(SSID, PASSWORD)
-    
+
     timeout = _WIFI_TIMEOUT
     print(f"WiFi: Connecting to '{SSID}'... (timeout: {timeout}s)")
     while not wlan.isconnected() and timeout > 0:
@@ -91,9 +94,7 @@ def wifi_connect_with_creds(SSID, PASSWORD, SECURITY):
         print(f"WiFi: Successfully connected to '{SSID}' with IP: {ip}")
         return ip
     else:
-        print(
-            f"WiFi: Connection to '{SSID}' timed out after {_WIFI_TIMEOUT} seconds"
-        )
+        print(f"WiFi: Connection to '{SSID}' timed out after {_WIFI_TIMEOUT} seconds")
         return None
 
 
@@ -102,7 +103,7 @@ def wifi_connect():
     """
     Connect to WiFi using credentials saved in NVS.
     Used during normal boot to connect to previously configured network.
-    
+
     Returns:
         IP address string if connected, None if failed or no credentials saved
     """
@@ -236,3 +237,96 @@ async def device_scan(device_found_callback=None):
 
     print(f"Discovery complete, found {len(devices)} devices")
     return devices
+
+
+def clear_device_state():
+    """
+    Clear all device configuration from NVS (factory reset).
+    This removes WiFi credentials and any other saved state.
+    """
+    try:
+        print("Factory reset: Clearing all device state from NVS...")
+        nvs = esp32.NVS(_NVS_NAME)
+        
+        # Clear WiFi credentials
+        try:
+            nvs.erase_key("SSID")
+            print("  - Cleared SSID")
+        except:
+            pass
+            
+        try:
+            nvs.erase_key("PASSWORD")
+            print("  - Cleared PASSWORD")
+        except:
+            pass
+            
+        try:
+            nvs.erase_key("SECURITY")
+            print("  - Cleared SECURITY")
+        except:
+            pass
+        
+        nvs.commit()
+        print("Factory reset: NVS cleared successfully")
+        return True
+    except Exception as e:
+        print(f"Factory reset: Error clearing NVS: {e}")
+        return False
+
+
+def check_reset_button():
+    """
+    Check if BOOT button is held for factory reset.
+    Returns True if button held for required duration.
+    """
+    button = Pin(_BOOT_BUTTON_PIN, Pin.IN, Pin.PULL_UP)
+    
+    # Button is pressed when value is 0 (active low with pull-up)
+    if button.value() == 0:
+        print(f"Reset button pressed, checking hold time ({_RESET_HOLD_TIME}s)...")
+        
+        # Visual feedback - rapid blink while waiting
+        start_time = time.time()
+        while time.time() - start_time < _RESET_HOLD_TIME:
+            if button.value() == 1:
+                # Button released early
+                print("Reset button released early, reset cancelled")
+                _LED.off()
+                return False
+            
+            # Blink LED rapidly to show we're counting
+            _LED.value(not _LED.value())
+            time.sleep(0.2)
+        
+        # Button held for full duration
+        print("Reset button held for required time!")
+        
+        # Confirmation pattern - fast blinks
+        led_toggle("reset")
+        return True
+    
+    return False
+
+
+async def monitor_reset_button():
+    """
+    Background task to continuously monitor for factory reset button press.
+    Runs during normal operation (WiFi/MQTT mode).
+    """
+    button = Pin(_BOOT_BUTTON_PIN, Pin.IN, Pin.PULL_UP)
+    print("Reset button monitoring started (hold BOOT button 8s for factory reset)")
+    
+    while True:
+        await asyncio.sleep(0.5)  # Check every 500ms
+        
+        if button.value() == 0:  # Button pressed
+            print("Reset button detected during operation...")
+            if check_reset_button():
+                # Factory reset confirmed
+                print("Factory reset confirmed! Clearing device and rebooting...")
+                clear_device_state()
+                time.sleep(1)
+                machine.reset()
+        
+        await asyncio.sleep(0.5)  # Additional delay between checks

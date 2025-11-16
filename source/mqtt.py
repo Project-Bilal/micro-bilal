@@ -1,5 +1,5 @@
 from umqtt.simple import MQTTClient
-from utils import led_toggle
+from utils import led_toggle, check_reset_button, clear_device_state
 from cast import Chromecast
 import utime as time
 import json
@@ -423,6 +423,16 @@ class MQTTHandler(object):
                     print("Executing requested reboot...")
                     time.sleep(1)
                     machine.reset()
+
+                # Check for factory reset button (non-blocking check every second)
+                from machine import Pin
+                button = Pin(0, Pin.IN, Pin.PULL_UP)
+                if button.value() == 0:  # Button pressed
+                    if check_reset_button():
+                        print("Factory reset confirmed during MQTT operation!")
+                        clear_device_state()
+                        time.sleep(1)
+                        machine.reset()
 
                 self.mqtt.check_msg()
 

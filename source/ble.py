@@ -10,6 +10,7 @@ from utils import (
     get_mac,
     wifi_connect,
     wifi_connect_with_creds,
+    monitor_reset_button,
 )  # Custom utility functions
 import machine  # Hardware control
 import bluetooth  # BLE functionality
@@ -88,31 +89,35 @@ async def control_task(connection, char):
                     SECURITY = data.get("SECURITY")
                     print(f"BLE: Received WiFi credentials for SSID: '{SSID}'")
                     print(f"BLE: Security type: {SECURITY}")
-                    
+
                     # TWO-PHASE COMMIT: Test connection BEFORE saving to NVS
                     # This prevents orphaned devices with bad credentials saved
                     time.sleep(0.5)  # Prevent ESP32 crashes
-                    print(f"BLE: Testing connection to '{SSID}' (credentials NOT saved yet)...")
+                    print(
+                        f"BLE: Testing connection to '{SSID}' (credentials NOT saved yet)..."
+                    )
                     ip = wifi_connect_with_creds(SSID, PASSWORD, SECURITY)
-                    
+
                     if ip:
                         # Connection successful! NOW save credentials to NVS
                         print(f"BLE: Connection successful with IP: {ip}")
                         print(f"BLE: Saving credentials to NVS...")
                         set_wifi(SSID, SECURITY, PASSWORD)
-                        
+
                         # Confirm success to app
                         msg = b'{"HEADER":"network_written", "MESSAGE":"success"}'
                         char.notify(connection, msg)
                         time.sleep(2)
-                        
+
                         # Restart device to begin normal operation
                         print(f"BLE: Credentials saved, rebooting...")
                         machine.reset()
                     else:
                         # Connection failed - credentials never saved, no cleanup needed
-                        print(f"BLE: Failed to connect to '{SSID}' - credentials NOT saved")
-                        
+                        print(
+                            f"BLE: Failed to connect to '{SSID}' - credentials NOT saved"
+                        )
+
                         # Inform app of failure
                         msg = b'{"HEADER":"network_written", "MESSAGE":"fail"}'
                         char.notify(connection, msg)
@@ -132,6 +137,9 @@ async def run_ble():
     Main BLE service loop. Sets up the service, characteristics,
     and handles client connections.
     """
+    # Start factory reset button monitoring in background
+    asyncio.create_task(monitor_reset_button())
+    
     while True:
         # Create BLE service and characteristics
         service = aioble.Service(_SERVICE_UUID)

@@ -1,4 +1,4 @@
-from utils import wifi_connect, led_toggle, get_mac
+from utils import wifi_connect, led_toggle, get_mac, check_reset_button, clear_device_state
 from ble import run_ble
 import machine
 import ota.rollback
@@ -8,6 +8,14 @@ import mqtt
 
 
 def startup():
+    # Check for factory reset button on boot
+    print("Checking for factory reset button...")
+    if check_reset_button():
+        print("Factory reset triggered on boot!")
+        clear_device_state()
+        time.sleep(1)
+        machine.reset()
+    
     led_toggle()
     ip = wifi_connect()
     if ip:
