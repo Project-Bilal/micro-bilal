@@ -43,13 +43,69 @@ def get_mac():
     return mac
 
 
-# connect to wifi and return ip
-def wifi_connect():
+# connect to wifi with provided credentials and return ip
+def wifi_connect_with_creds(SSID, PASSWORD, SECURITY):
+    """
+    Test WiFi connection with provided credentials without saving to NVS.
+    Used during onboarding to verify credentials before persisting them.
+    
+    Args:
+        SSID: WiFi network name
+        PASSWORD: WiFi password (can be None for open networks)
+        SECURITY: Security type (0 for open, non-zero for secured)
+    
+    Returns:
+        IP address string if connected, None if failed
+    """
     network.hostname("Bilal Cast")
     wlan = network.WLAN(network.STA_IF)
     wlan.active(True)
     wlan.disconnect()
     time.sleep(1)
+
+    # Validate we have required parameters
+    if not SSID or SECURITY is None:
+        print("WiFi: Invalid credentials provided")
+        return None
+
+    # Connect to the WiFi network
+    print(f"WiFi: Testing connection to SSID: '{SSID}' (Security: {SECURITY})")
+    if SECURITY == 0:
+        wlan.connect(SSID)
+    else:
+        if not PASSWORD:
+            print("WiFi: Password required for secured network")
+            return None
+        wlan.connect(SSID, PASSWORD)
+    
+    timeout = _WIFI_TIMEOUT
+    print(f"WiFi: Connecting to '{SSID}'... (timeout: {timeout}s)")
+    while not wlan.isconnected() and timeout > 0:
+        time.sleep(1)
+        timeout -= 1
+
+    # if we connected return back with the ip
+    if wlan.isconnected():
+        led_toggle("wifi")
+        ip = wlan.ifconfig()[0]
+        print(f"WiFi: Successfully connected to '{SSID}' with IP: {ip}")
+        return ip
+    else:
+        print(
+            f"WiFi: Connection to '{SSID}' timed out after {_WIFI_TIMEOUT} seconds"
+        )
+        return None
+
+
+# connect to wifi using saved credentials from NVS and return ip
+def wifi_connect():
+    """
+    Connect to WiFi using credentials saved in NVS.
+    Used during normal boot to connect to previously configured network.
+    
+    Returns:
+        IP address string if connected, None if failed or no credentials saved
+    """
     nvs = esp32.NVS(_NVS_NAME)
     buffer = bytearray(_BUFFER_SIZE)  # Create a buffer
 
@@ -63,33 +119,8 @@ def wifi_connect():
         # if values do not exist return None
         return None
 
-    # Make sure we have both SSID and PASS
-    if SSID and PASS and SECURITY:
-        # Connect to the WiFi network
-        print(f"WiFi: Attempting to connect to SSID: '{SSID}' (Security: {SECURITY})")
-        if SECURITY == 0:
-            wlan.connect(SSID)
-        else:
-            wlan.connect(SSID, PASS)
-        timeout = _WIFI_TIMEOUT
-        print(f"WiFi: Connecting to '{SSID}'... (timeout: {timeout}s)")
-        while not wlan.isconnected() and timeout > 0:
-            time.sleep(1)
-            timeout -= 1
-
-        # if we conected return back with the ip
-        if wlan.isconnected():
-            led_toggle("wifi")
-            ip = wlan.ifconfig()[0]
-            print(f"WiFi: Successfully connected to '{SSID}' with IP: {ip}")
-            return ip
-        else:
-            print(
-                f"WiFi: Connection to '{SSID}' timed out after {_WIFI_TIMEOUT} seconds"
-            )
-
-    # if connection does not succeed
-    return None
+    # Use the new function to connect with saved credentials
+    return wifi_connect_with_creds(SSID, PASS, SECURITY)
 
 
 # save wifi credentials to nvs

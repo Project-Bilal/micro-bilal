@@ -9,6 +9,7 @@ from utils import (
     set_wifi,
     get_mac,
     wifi_connect,
+    wifi_connect_with_creds,
 )  # Custom utility functions
 import machine  # Hardware control
 import bluetooth  # BLE functionality
@@ -88,19 +89,35 @@ async def control_task(connection, char):
                     print(f"BLE: Received WiFi credentials for SSID: '{SSID}'")
                     print(f"BLE: Security type: {SECURITY}")
                     
-                    # Save WiFi configuration
-                    set_wifi(SSID, SECURITY, PASSWORD)
+                    # TWO-PHASE COMMIT: Test connection BEFORE saving to NVS
+                    # This prevents orphaned devices with bad credentials saved
                     time.sleep(0.5)  # Prevent ESP32 crashes
+                    print(f"BLE: Testing connection to '{SSID}' (credentials NOT saved yet)...")
+                    ip = wifi_connect_with_creds(SSID, PASSWORD, SECURITY)
                     
-                    # Send acknowledgment to app
-                    msg = b'{"HEADER":"network_written", "MESSAGE":"pending"}'
-                    char.notify(connection, msg)
-                    time.sleep(1)
-                    
-                    # Immediate restart - device will connect on boot with clean WiFi state
-                    # Mobile app monitors device status via MQTT, not BLE
-                    print("BLE: Credentials saved, rebooting to connect...")
-                    machine.reset()
+                    if ip:
+                        # Connection successful! NOW save credentials to NVS
+                        print(f"BLE: Connection successful with IP: {ip}")
+                        print(f"BLE: Saving credentials to NVS...")
+                        set_wifi(SSID, SECURITY, PASSWORD)
+                        
+                        # Confirm success to app
+                        msg = b'{"HEADER":"network_written", "MESSAGE":"success"}'
+                        char.notify(connection, msg)
+                        time.sleep(2)
+                        
+                        # Restart device to begin normal operation
+                        print(f"BLE: Credentials saved, rebooting...")
+                        machine.reset()
+                    else:
+                        # Connection failed - credentials never saved, no cleanup needed
+                        print(f"BLE: Failed to connect to '{SSID}' - credentials NOT saved")
+                        
+                        # Inform app of failure
+                        msg = b'{"HEADER":"network_written", "MESSAGE":"fail"}'
+                        char.notify(connection, msg)
+                        time.sleep(2)
+                        # Device stays in BLE mode for user to retry
 
     except Exception as e:
         print(f"BLE control_task error: {type(e).__name__}: {repr(e)}")
