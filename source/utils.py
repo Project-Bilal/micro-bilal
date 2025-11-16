@@ -100,13 +100,11 @@ def wifi_connect_with_creds(SSID, PASSWORD, SECURITY):
         return ip
     else:
         print(f"WiFi: Connection to '{SSID}' timed out after {_WIFI_TIMEOUT} seconds")
-        # CRITICAL: Forcefully abort the connection attempt
-        # This prevents WiFi radio from staying in stuck/connecting state
-        print("WiFi: Aborting connection and resetting WiFi radio...")
+        # CRITICAL: Abort the connection attempt but keep radio active for future scans
+        print("WiFi: Aborting connection attempt...")
         wlan.disconnect()
-        wlan.active(False)
         time.sleep(0.5)
-        print("WiFi: Radio reset complete")
+        print("WiFi: Connection aborted, radio remains active for scanning")
         return None
 
 
@@ -168,13 +166,11 @@ def wifi_scan():
                 print(f"WiFi scan retry {attempt + 1}/3")
                 time.sleep(2)
 
-            # Aggressive radio reset to ensure clean state
-            # This is critical after failed connection attempts that leave radio in bad state
-            print("WiFi: Resetting radio for scan...")
-            wlan.disconnect()
-            wlan.active(False)
-            time.sleep(0.5)
+            # Ensure WiFi is active and abort any pending connections
+            # Don't use active(False)->active(True) here as it's too aggressive for scanning
+            print("WiFi: Preparing for scan...")
             wlan.active(True)
+            wlan.disconnect()  # Abort any pending connection attempts
             time.sleep(1.5)
 
             networks = wlan.scan()
