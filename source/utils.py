@@ -15,7 +15,12 @@ _WIFI_TIMEOUT = const(30)  # WiFi connection timeout in seconds
 
 _LED_PIN = const(2)  # For the ESP32 built-in LED
 _BLINK_DELAY = const(0.25)  # Blink delay in seconds
-_BLINK_COUNT = {"wifi": const(6), "mqtt": const(4), "default": const(8), "reset": const(10)}
+_BLINK_COUNT = {
+    "wifi": const(6),
+    "mqtt": const(4),
+    "default": const(8),
+    "reset": const(10),
+}
 _LED = Pin(_LED_PIN, Pin.OUT)  # Create single LED instance
 
 _BOOT_BUTTON_PIN = const(0)  # Built-in BOOT button on ESP32
@@ -156,7 +161,9 @@ def wifi_scan():
                 print(f"WiFi scan retry {attempt + 1}/3")
                 time.sleep(2)
 
-            # Simple approach: activate, disconnect, wait, scan
+            # Aggressive reset: deactivate first to ensure clean state
+            wlan.active(False)
+            time.sleep(0.5)
             wlan.active(True)
             wlan.disconnect()
             time.sleep(1.5)
@@ -247,26 +254,26 @@ def clear_device_state():
     try:
         print("Factory reset: Clearing all device state from NVS...")
         nvs = esp32.NVS(_NVS_NAME)
-        
+
         # Clear WiFi credentials
         try:
             nvs.erase_key("SSID")
             print("  - Cleared SSID")
         except:
             pass
-            
+
         try:
             nvs.erase_key("PASSWORD")
             print("  - Cleared PASSWORD")
         except:
             pass
-            
+
         try:
             nvs.erase_key("SECURITY")
             print("  - Cleared SECURITY")
         except:
             pass
-        
+
         nvs.commit()
         print("Factory reset: NVS cleared successfully")
         return True
@@ -281,11 +288,11 @@ def check_reset_button():
     Returns True if button held for required duration.
     """
     button = Pin(_BOOT_BUTTON_PIN, Pin.IN, Pin.PULL_UP)
-    
+
     # Button is pressed when value is 0 (active low with pull-up)
     if button.value() == 0:
         print(f"Reset button pressed, checking hold time ({_RESET_HOLD_TIME}s)...")
-        
+
         # Visual feedback - rapid blink while waiting
         start_time = time.time()
         while time.time() - start_time < _RESET_HOLD_TIME:
@@ -294,18 +301,18 @@ def check_reset_button():
                 print("Reset button released early, reset cancelled")
                 _LED.off()
                 return False
-            
+
             # Blink LED rapidly to show we're counting
             _LED.value(not _LED.value())
             time.sleep(0.2)
-        
+
         # Button held for full duration
         print("Reset button held for required time!")
-        
+
         # Confirmation pattern - fast blinks
         led_toggle("reset")
         return True
-    
+
     return False
 
 
@@ -316,10 +323,10 @@ async def monitor_reset_button():
     """
     button = Pin(_BOOT_BUTTON_PIN, Pin.IN, Pin.PULL_UP)
     print("Reset button monitoring started (hold BOOT button 8s for factory reset)")
-    
+
     while True:
         await asyncio.sleep(0.5)  # Check every 500ms
-        
+
         if button.value() == 0:  # Button pressed
             print("Reset button detected during operation...")
             if check_reset_button():
@@ -328,5 +335,5 @@ async def monitor_reset_button():
                 clear_device_state()
                 time.sleep(1)
                 machine.reset()
-        
+
         await asyncio.sleep(0.5)  # Additional delay between checks

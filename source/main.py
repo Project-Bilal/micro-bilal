@@ -27,18 +27,7 @@ def startup():
     if ip:
         print("connected: ", ip)
         return True
-    
-    # WiFi connection failed or no credentials
     print("no WiFi connection")
-    
-    # Properly deactivate WiFi before entering BLE mode
-    # This ensures clean state for BLE WiFi scanning
-    import network
-    wlan = network.WLAN(network.STA_IF)
-    wlan.active(False)
-    print("WiFi radio deactivated, preparing for BLE mode")
-    time.sleep(0.5)  # Brief delay to ensure radio is fully deactivated
-    
     return False
 
 
