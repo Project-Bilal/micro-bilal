@@ -93,6 +93,18 @@ async def control_task(connection, char):
                     # TWO-PHASE COMMIT: Test connection BEFORE saving to NVS
                     # This prevents orphaned devices with bad credentials saved
                     time.sleep(0.5)  # Prevent ESP32 crashes
+                    
+                    # Reset WiFi radio to ensure clean state for connection attempt
+                    # This is critical for re-onboarding scenarios where previous
+                    # connection state might interfere
+                    print("BLE: Resetting WiFi radio for clean connection attempt...")
+                    wlan = network.WLAN(network.STA_IF)
+                    wlan.disconnect()
+                    wlan.active(False)
+                    time.sleep(0.5)
+                    wlan.active(True)
+                    time.sleep(1)
+                    
                     print(
                         f"BLE: Testing connection to '{SSID}' (credentials NOT saved yet)..."
                     )
@@ -139,7 +151,7 @@ async def run_ble():
     """
     # Start factory reset button monitoring in background
     asyncio.create_task(monitor_reset_button())
-    
+
     while True:
         # Create BLE service and characteristics
         service = aioble.Service(_SERVICE_UUID)

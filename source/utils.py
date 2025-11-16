@@ -56,25 +56,19 @@ def wifi_connect_with_creds(SSID, PASSWORD, SECURITY):
     """
     Test WiFi connection with provided credentials without saving to NVS.
     Used during onboarding to verify credentials before persisting them.
-
+    
     Args:
         SSID: WiFi network name
         PASSWORD: WiFi password (can be None for open networks)
         SECURITY: Security type (0 for open, non-zero for secured)
-
+    
     Returns:
         IP address string if connected, None if failed
     """
     network.hostname("Bilal Cast")
     wlan = network.WLAN(network.STA_IF)
-
-    # ALWAYS start with clean WiFi radio state
-    # This ensures reliable connection regardless of previous state
-    print("WiFi: Resetting radio for fresh connection attempt...")
-    wlan.disconnect()
-    wlan.active(False)
-    time.sleep(0.5)
     wlan.active(True)
+    wlan.disconnect()
     time.sleep(1)
 
     # Validate we have required parameters
