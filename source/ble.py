@@ -16,6 +16,7 @@ import machine  # Hardware control
 import bluetooth  # BLE functionality
 from micropython import const  # Constant definition
 import utime as time  # Time functions
+import network  # WiFi network management
 
 # Constants for BLE configuration
 # Long advertisement interval to conserve power
@@ -93,7 +94,7 @@ async def control_task(connection, char):
                     # TWO-PHASE COMMIT: Test connection BEFORE saving to NVS
                     # This prevents orphaned devices with bad credentials saved
                     time.sleep(0.5)  # Prevent ESP32 crashes
-                    
+
                     # Reset WiFi radio to ensure clean state for connection attempt
                     # This is critical for re-onboarding scenarios where previous
                     # connection state might interfere
@@ -104,7 +105,7 @@ async def control_task(connection, char):
                     time.sleep(0.5)
                     wlan.active(True)
                     time.sleep(1)
-                    
+
                     print(
                         f"BLE: Testing connection to '{SSID}' (credentials NOT saved yet)..."
                     )
