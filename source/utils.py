@@ -100,11 +100,16 @@ def wifi_connect_with_creds(SSID, PASSWORD, SECURITY):
         return ip
     else:
         print(f"WiFi: Connection to '{SSID}' timed out after {_WIFI_TIMEOUT} seconds")
-        # CRITICAL: Abort the connection attempt but keep radio active for future scans
-        print("WiFi: Aborting connection attempt...")
+        # CRITICAL: Full radio reset after failed connection to ensure clean state
+        # Use longer delays to prevent "WiFi Not Started" errors on next operation
+        print("WiFi: Performing full radio reset after failed connection...")
         wlan.disconnect()
-        time.sleep(0.5)
-        print("WiFi: Connection aborted, radio remains active for scanning")
+        time.sleep(1)
+        wlan.active(False)
+        time.sleep(2)  # Longer delay to let WiFi subsystem fully shut down
+        wlan.active(True)
+        time.sleep(2)  # Longer delay to let WiFi subsystem fully reinitialize
+        print("WiFi: Radio reset complete, ready for next operation")
         return None
 
 
