@@ -158,7 +158,7 @@ def set_wifi(SSID, SECURITY, PASSWORD=None):
 
 
 def wifi_scan():
-    """Scan for available WiFi networks with full radio reset."""
+    """Scan for available WiFi networks with simple activation."""
     wlan = network.WLAN(network.STA_IF)
 
     # Try up to 3 times on hardware errors only
@@ -168,15 +168,18 @@ def wifi_scan():
                 print(f"WiFi scan retry {attempt + 1}/3")
                 time.sleep(2)
 
-            # ALWAYS do full radio reset before scanning
-            # This ensures clean state regardless of what happened before (boot, failed connection, etc.)
-            print("WiFi: Performing full radio reset for scan...")
-            wlan.disconnect()
-            wlan.active(False)
-            time.sleep(2)  # Let WiFi subsystem fully shut down
-            wlan.active(True)
-            time.sleep(2)  # Let WiFi subsystem fully reinitialize
-            print("WiFi: Radio ready for scanning")
+            # Simple approach: just ensure WiFi is active
+            # After failed connection, radio is OFF, this turns it back ON
+            # On first boot, radio is uninitialized, this initializes it
+            print("WiFi: Activating radio for scan...")
+            if wlan.active():
+                # Radio already active, just disconnect any pending connections
+                wlan.disconnect()
+                time.sleep(0.5)
+            else:
+                # Radio off (from failed connection), turn it on
+                wlan.active(True)
+                time.sleep(2)  # Wait for initialization
 
             networks = wlan.scan()
             print(f"WiFi: Scan returned {len(networks)} raw networks")
