@@ -56,20 +56,37 @@ def wifi_connect_with_creds(SSID, PASSWORD, SECURITY):
     """
     Test WiFi connection with provided credentials without saving to NVS.
     Used during onboarding to verify credentials before persisting them.
-
+    
     Args:
         SSID: WiFi network name
         PASSWORD: WiFi password (can be None for open networks)
         SECURITY: Security type (0 for open, non-zero for secured)
-
+    
     Returns:
         IP address string if connected, None if failed
     """
     network.hostname("Bilal Cast")
     wlan = network.WLAN(network.STA_IF)
-    wlan.active(True)
-    wlan.disconnect()
-    time.sleep(1)
+    
+    # Prepare radio for connection attempt
+    # If radio is already active (from scanning), do full reset to clear scan mode
+    # If radio is inactive (first connection), just activate it
+    print("WiFi: Preparing radio for connection...")
+    if wlan.active():
+        # Radio active from previous scan - need full reset to clear scan state
+        print("WiFi: Radio active, performing full reset to clear scan mode...")
+        wlan.disconnect()
+        wlan.active(False)
+        time.sleep(2)  # Let WiFi subsystem fully shut down
+        wlan.active(True)
+        time.sleep(2)  # Let WiFi subsystem fully reinitialize
+        print("WiFi: Radio reset complete, ready for connection")
+    else:
+        # Radio inactive (first connection or after boot) - just activate
+        print("WiFi: Radio inactive, activating...")
+        wlan.active(True)
+        time.sleep(2)
+        print("WiFi: Radio activated, ready for connection")
 
     # Validate we have required parameters
     if not SSID or SECURITY is None:
