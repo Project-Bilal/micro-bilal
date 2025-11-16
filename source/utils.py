@@ -100,16 +100,13 @@ def wifi_connect_with_creds(SSID, PASSWORD, SECURITY):
         return ip
     else:
         print(f"WiFi: Connection to '{SSID}' timed out after {_WIFI_TIMEOUT} seconds")
-        # CRITICAL: Full radio reset after failed connection to ensure clean state
-        # Use longer delays to prevent "WiFi Not Started" errors on next operation
-        print("WiFi: Performing full radio reset after failed connection...")
+        # CRITICAL: Turn off radio after failed connection
+        # wifi_scan() will handle full reset with proper delays when needed
+        print("WiFi: Deactivating radio after failed connection...")
         wlan.disconnect()
-        time.sleep(1)
         wlan.active(False)
-        time.sleep(2)  # Longer delay to let WiFi subsystem fully shut down
-        wlan.active(True)
-        time.sleep(2)  # Longer delay to let WiFi subsystem fully reinitialize
-        print("WiFi: Radio reset complete, ready for next operation")
+        time.sleep(1)
+        print("WiFi: Radio deactivated, wifi_scan() will reset when ready")
         return None
 
 
@@ -161,7 +158,7 @@ def set_wifi(SSID, SECURITY, PASSWORD=None):
 
 
 def wifi_scan():
-    """Scan for available WiFi networks with simple retry logic."""
+    """Scan for available WiFi networks with full radio reset."""
     wlan = network.WLAN(network.STA_IF)
 
     # Try up to 3 times on hardware errors only
@@ -171,12 +168,15 @@ def wifi_scan():
                 print(f"WiFi scan retry {attempt + 1}/3")
                 time.sleep(2)
 
-            # Ensure WiFi is active and abort any pending connections
-            # Don't use active(False)->active(True) here as it's too aggressive for scanning
-            print("WiFi: Preparing for scan...")
+            # ALWAYS do full radio reset before scanning
+            # This ensures clean state regardless of what happened before (boot, failed connection, etc.)
+            print("WiFi: Performing full radio reset for scan...")
+            wlan.disconnect()
+            wlan.active(False)
+            time.sleep(2)  # Let WiFi subsystem fully shut down
             wlan.active(True)
-            wlan.disconnect()  # Abort any pending connection attempts
-            time.sleep(1.5)
+            time.sleep(2)  # Let WiFi subsystem fully reinitialize
+            print("WiFi: Radio ready for scanning")
 
             networks = wlan.scan()
             print(f"WiFi: Scan returned {len(networks)} raw networks")
