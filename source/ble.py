@@ -87,38 +87,20 @@ async def control_task(connection, char):
                     SECURITY = data.get("SECURITY")
                     print(f"BLE: Received WiFi credentials for SSID: '{SSID}'")
                     print(f"BLE: Security type: {SECURITY}")
+                    
                     # Save WiFi configuration
                     set_wifi(SSID, SECURITY, PASSWORD)
                     time.sleep(0.5)  # Prevent ESP32 crashes
-                    print(f"BLE: Attempting to connect to '{SSID}'...")
-                    ip = wifi_connect()
-                    # Confirm successful configuration
-                    # then reset device
-                    if ip:
-                        print(f"BLE: Successfully connected to '{SSID}' with IP: {ip}")
-                        msg = b'{"HEADER":"network_written", "MESSAGE":"success"}'
-                        char.notify(connection, msg)
-                        time.sleep(2)
-                        machine.reset()  # Restart device to apply new WiFi settings
-                    # Inform client of failed configuration
-                    # and wait before next attempt
-                    print(f"BLE: Failed to connect to '{SSID}'")
-
-                    # Clear the faulty WiFi credentials from NVS
-                    try:
-                        import esp32
-
-                        nvs = esp32.NVS("wifi_creds")
-                        nvs.erase_key("PASSWORD")
-                        nvs.erase_key("SSID")
-                        nvs.erase_key("SECURITY")
-                        print("Cleared faulty WiFi credentials from NVS")
-                    except Exception as e:
-                        print(f"Error clearing WiFi credentials: {e}")
-
-                    msg = b'{"HEADER":"network_written", "MESSAGE":"fail"}'
+                    
+                    # Send acknowledgment to app
+                    msg = b'{"HEADER":"network_written", "MESSAGE":"pending"}'
                     char.notify(connection, msg)
-                    time.sleep(2)
+                    time.sleep(1)
+                    
+                    # Immediate restart - device will connect on boot with clean WiFi state
+                    # Mobile app monitors device status via MQTT, not BLE
+                    print("BLE: Credentials saved, rebooting to connect...")
+                    machine.reset()
 
     except Exception as e:
         print(f"BLE control_task error: {type(e).__name__}: {repr(e)}")
