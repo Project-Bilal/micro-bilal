@@ -131,13 +131,13 @@ def wifi_scan():
 
             networks = wlan.scan()
             print(f"WiFi: Scan returned {len(networks)} raw networks")
-            
+
             # If scan returned 0 networks and we have retries left, try again
             if len(networks) == 0 and attempt < 2:
                 print("WiFi: Scan returned 0 networks, will retry...")
                 time.sleep(1)
                 continue
-            
+
             # Process results
             wifi_dict = {}
             for wifi_network in networks:
