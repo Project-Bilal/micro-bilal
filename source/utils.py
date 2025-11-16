@@ -67,8 +67,14 @@ def wifi_connect_with_creds(SSID, PASSWORD, SECURITY):
     """
     network.hostname("Bilal Cast")
     wlan = network.WLAN(network.STA_IF)
-    wlan.active(True)
+
+    # ALWAYS start with clean WiFi radio state
+    # This ensures reliable connection regardless of previous state
+    print("WiFi: Resetting radio for fresh connection attempt...")
     wlan.disconnect()
+    wlan.active(False)
+    time.sleep(0.5)
+    wlan.active(True)
     time.sleep(1)
 
     # Validate we have required parameters
