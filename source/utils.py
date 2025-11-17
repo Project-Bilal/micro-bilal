@@ -340,13 +340,13 @@ def check_reset_button():
         print("Reset button held for required time!")
         print("LED solid ON - waiting for button release...")
         _LED.on()  # Turn LED solid to indicate "you can release now"
-        
+
         # Wait for user to release button
         while button.value() == 0:
             time.sleep(0.1)
-        
+
         print("Button released - performing factory reset!")
-        
+
         # Confirmation pattern - fast blinks to confirm reset
         led_toggle("reset")
         return True

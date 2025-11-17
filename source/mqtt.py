@@ -426,6 +426,7 @@ class MQTTHandler(object):
 
                 # Check for factory reset button (non-blocking check every second)
                 from machine import Pin
+
                 button = Pin(0, Pin.IN, Pin.PULL_UP)
                 if button.value() == 0:  # Button pressed
                     if check_reset_button():
