@@ -88,6 +88,12 @@ class MQTTHandler(object):
     def sub_cb(self, topic, msg):
         try:
             msg = json.loads(msg)
+            
+            # Immediately ignore keepalive messages to prevent interference
+            # These come from the phone app every 30 seconds and don't need processing
+            if msg.get("type") == "keepalive":
+                return
+            
             led_toggle("mqtt")
 
             action = msg.get("action", {})
@@ -386,11 +392,20 @@ class MQTTHandler(object):
             device = Chromecast(ip, port)
 
             # Play URL with volume (volume is set after media loads)
-            device.play_url(url, volume=vol)
+            playback_confirmed = device.play_url(url, volume=vol)
 
             # Wait for audio to start before disconnecting
-            time.sleep(2)
-            print("MQTT: Audio playback completed successfully")
+            # If playback wasn't confirmed, wait longer to give Chromecast time
+            if playback_confirmed:
+                # Confirmed - audio should start soon, wait a bit
+                time.sleep(2)
+                print("MQTT: Audio playback confirmed, starting...")
+            else:
+                # Not confirmed - Chromecast might be slow, wait longer
+                print("MQTT: Playback not confirmed, waiting longer for Chromecast to start...")
+                time.sleep(5)
+            
+            print("MQTT: Audio playback initiated")
 
         except Exception as e:
             print(f"MQTT: Chromecast error: {e}")
