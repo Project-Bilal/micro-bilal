@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # Script to upload application files to ESP32 filesystem
+# You must have the firmware.bin already flashed to the device.
 # Usage: ./upload_app.sh [port]
 # Example: ./upload_app.sh /dev/cu.usbserial-10
 

@@ -1,4 +1,5 @@
 #!/bin/bash
+# This script is used to build the firmware and flash it to the ESP32 device.
 
 # Configuration
 IMAGE_NAME="esp32-mdns-ota"
