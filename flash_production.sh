@@ -80,19 +80,55 @@ check_requirements() {
     print_success "All requirements met!"
 }
 
+# List all available serial ports
+list_available_ports() {
+    local ports=()
+    
+    # macOS ports (cu.* - callout ports are preferred for programming)
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        for port in /dev/cu.usbserial* /dev/cu.wchusbserial* /dev/cu.usbmodem* /dev/cu.SLAB_USBtoUART* /dev/cu.*; do
+            if [ -e "$port" ] && [ ! -d "$port" ]; then
+                ports+=("$port")
+            fi
+        done
+    else
+        # Linux ports
+        for port in /dev/ttyUSB* /dev/ttyACM* /dev/ttyAMA*; do
+            if [ -e "$port" ]; then
+                ports+=("$port")
+            fi
+        done
+    fi
+    
+    # Remove duplicates and sort
+    printf '%s\n' "${ports[@]}" | sort -u
+}
+
 # Detect USB port
 detect_port() {
+    # Try default port first
     if [ -e "$DEFAULT_PORT" ]; then
         echo "$DEFAULT_PORT"
         return 0
     fi
     
     # Try to find other common ports
-    for port in /dev/cu.usbserial-* /dev/ttyUSB* /dev/cu.SLAB_USBtoUART; do
-        if [ -e "$port" ]; then
-            echo "$port"
-            return 0
-        fi
+    local common_patterns=(
+        "/dev/cu.usbserial*"
+        "/dev/cu.wchusbserial*"
+        "/dev/cu.usbmodem*"
+        "/dev/cu.SLAB_USBtoUART*"
+        "/dev/ttyUSB*"
+        "/dev/ttyACM*"
+    )
+    
+    for pattern in "${common_patterns[@]}"; do
+        for port in $pattern; do
+            if [ -e "$port" ] && [ ! -d "$port" ]; then
+                echo "$port"
+                return 0
+            fi
+        done
     done
     
     return 1
@@ -116,12 +152,38 @@ flash_device() {
         return 1
     fi
     
-    # Step 2: Flash firmware
-    print_status "Step 2/3: Flashing firmware..."
-    if esptool.py --chip esp32 --port "$port" --baud 460800 write_flash -z 0x1000 "$FIRMWARE_PATH" 2>&1 | grep -q "Hash of data verified"; then
+    # Step 2: Detect chip type and flash firmware
+    print_status "Step 2/3: Detecting chip type..."
+    local chip_info=$(esptool.py --port "$port" chip_id 2>&1)
+    local chip_type=$(echo "$chip_info" | grep -i "chip is" | sed -E 's/.*chip is ([A-Z0-9-]+).*/\1/i' | head -1)
+    
+    if [ -n "$chip_type" ]; then
+        print_status "Detected chip: $chip_type"
+    else
+        print_warning "Could not detect chip type, using auto-detection"
+        chip_type="auto"
+    fi
+    
+    print_status "Flashing firmware..."
+    
+    # Use auto-detection if chip type is unknown, otherwise specify it
+    local flash_cmd
+    if [ "$chip_type" = "auto" ]; then
+        flash_cmd="esptool.py --port \"$port\" --baud 460800 write_flash -z 0x1000 \"$FIRMWARE_PATH\""
+    else
+        # Convert chip type to esptool format (ESP32-C3 -> esp32c3)
+        local chip_flag=$(echo "$chip_type" | tr '[:upper:]' '[:lower:]' | sed 's/-//g')
+        flash_cmd="esptool.py --chip $chip_flag --port \"$port\" --baud 460800 write_flash -z 0x1000 \"$FIRMWARE_PATH\""
+    fi
+    
+    local flash_output=$(eval "$flash_cmd" 2>&1)
+    if echo "$flash_output" | grep -q "Hash of data verified"; then
         print_success "Firmware flashed"
     else
         print_error "Failed to flash firmware"
+        echo ""
+        print_status "Error details:"
+        echo "$flash_output" | tail -10
         return 1
     fi
     
@@ -196,16 +258,49 @@ main() {
         PORT=$(detect_port)
         
         if [ -z "$PORT" ]; then
-            print_error "No USB device detected!"
-            print_status "Common ports to check:"
-            echo "  - macOS: /dev/cu.usbserial-*"
-            echo "  - Linux: /dev/ttyUSB*"
+            print_warning "No USB device automatically detected!"
             echo ""
-            read -p "Enter port manually (or press Enter to skip): " manual_port
+            print_status "Available serial ports:"
+            local available_ports=($(list_available_ports))
             
-            if [ -n "$manual_port" ]; then
-                PORT="$manual_port"
+            if [ ${#available_ports[@]} -eq 0 ]; then
+                print_error "No serial ports found!"
+                echo ""
+                print_status "Please:"
+                echo "  1. Make sure the ESP32 is connected via USB"
+                echo "  2. Try a different USB cable (some are power-only)"
+                echo "  3. Check if drivers are installed for your USB-to-serial chip"
+                echo ""
+                read -p "Enter port manually (or press Enter to skip this device): " manual_port
             else
+                echo ""
+                local i=1
+                for port in "${available_ports[@]}"; do
+                    echo "  $i) $port"
+                    i=$((i + 1))
+                done
+                echo ""
+                read -p "Select port number, or enter port path manually (or press Enter to skip): " port_choice
+                
+                if [[ "$port_choice" =~ ^[0-9]+$ ]] && [ "$port_choice" -ge 1 ] && [ "$port_choice" -le ${#available_ports[@]} ]; then
+                    PORT="${available_ports[$((port_choice - 1))]}"
+                    print_success "Selected: $PORT"
+                elif [ -n "$port_choice" ]; then
+                    PORT="$port_choice"
+                else
+                    device_count=$((device_count - 1))
+                    continue
+                fi
+            fi
+            
+            if [ -z "$PORT" ]; then
+                device_count=$((device_count - 1))
+                continue
+            fi
+            
+            # Verify the port exists
+            if [ ! -e "$PORT" ]; then
+                print_error "Port does not exist: $PORT"
                 device_count=$((device_count - 1))
                 continue
             fi
