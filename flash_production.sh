@@ -152,38 +152,12 @@ flash_device() {
         return 1
     fi
     
-    # Step 2: Detect chip type and flash firmware
-    print_status "Step 2/3: Detecting chip type..."
-    local chip_info=$(esptool.py --port "$port" chip_id 2>&1)
-    local chip_type=$(echo "$chip_info" | grep -i "chip is" | sed -E 's/.*chip is ([A-Z0-9-]+).*/\1/i' | head -1)
-    
-    if [ -n "$chip_type" ]; then
-        print_status "Detected chip: $chip_type"
-    else
-        print_warning "Could not detect chip type, using auto-detection"
-        chip_type="auto"
-    fi
-    
-    print_status "Flashing firmware..."
-    
-    # Use auto-detection if chip type is unknown, otherwise specify it
-    local flash_cmd
-    if [ "$chip_type" = "auto" ]; then
-        flash_cmd="esptool.py --port \"$port\" --baud 460800 write_flash -z 0x1000 \"$FIRMWARE_PATH\""
-    else
-        # Convert chip type to esptool format (ESP32-C3 -> esp32c3)
-        local chip_flag=$(echo "$chip_type" | tr '[:upper:]' '[:lower:]' | sed 's/-//g')
-        flash_cmd="esptool.py --chip $chip_flag --port \"$port\" --baud 460800 write_flash -z 0x1000 \"$FIRMWARE_PATH\""
-    fi
-    
-    local flash_output=$(eval "$flash_cmd" 2>&1)
-    if echo "$flash_output" | grep -q "Hash of data verified"; then
+    # Step 2: Flash firmware
+    print_status "Step 2/3: Flashing firmware..."
+    if esptool.py --chip esp32 --port "$port" --baud 460800 write_flash -z 0x1000 "$FIRMWARE_PATH" 2>&1 | grep -q "Hash of data verified"; then
         print_success "Firmware flashed"
     else
         print_error "Failed to flash firmware"
-        echo ""
-        print_status "Error details:"
-        echo "$flash_output" | tail -10
         return 1
     fi
     
@@ -244,13 +218,15 @@ main() {
         
         echo ""
         echo "================================================"
-        read -p "Ready to flash device #$device_count? (y/n/q to quit): " ready
+        read -p "Ready to flash device #$device_count? (y to flash, q to quit): " ready
         
         if [[ $ready =~ ^[Qq]$ ]]; then
             break
         fi
         
         if [[ ! $ready =~ ^[Yy]$ ]]; then
+            print_warning "Invalid input. Please enter 'y' to flash or 'q' to quit."
+            device_count=$((device_count - 1))  # Don't increment counter for invalid input
             continue
         fi
         
