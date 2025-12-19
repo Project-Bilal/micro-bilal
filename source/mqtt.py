@@ -88,12 +88,12 @@ class MQTTHandler(object):
     def sub_cb(self, topic, msg):
         try:
             msg = json.loads(msg)
-            
+
             # Immediately ignore keepalive messages to prevent interference
             # These come from the phone app every 30 seconds and don't need processing
             if msg.get("type") == "keepalive":
                 return
-            
+
             led_toggle("mqtt")
 
             action = msg.get("action", {})
@@ -402,9 +402,11 @@ class MQTTHandler(object):
                 print("MQTT: Audio playback confirmed, starting...")
             else:
                 # Not confirmed - Chromecast might be slow, wait longer
-                print("MQTT: Playback not confirmed, waiting longer for Chromecast to start...")
+                print(
+                    "MQTT: Playback not confirmed, waiting longer for Chromecast to start..."
+                )
                 time.sleep(5)
-            
+
             print("MQTT: Audio playback initiated")
 
         except Exception as e:
@@ -450,22 +452,70 @@ class MQTTHandler(object):
                         time.sleep(1)
                         machine.reset()
 
-                self.mqtt.check_msg()
+                # Check for messages with better error handling
+                try:
+                    self.mqtt.check_msg()
+                except OSError as e:
+                    # Network-level errors (connection lost, reset, etc.)
+                    if e.args[0] in [104, 113, -1]:
+                        raise Exception(f"Network error: {e}")
+                    else:
+                        # Other OSErrors might be recoverable, log and continue
+                        print(f"Network warning: {e}, continuing...")
+                except Exception as e:
+                    # Handle "bytes index out of range" and other library bugs
+                    error_str = str(e)
+                    if "index out of range" in error_str or "bytes index" in error_str:
+                        print(f"MQTT library error (malformed packet): {e}")
+                        print("Reconnecting to recover...")
+                        raise Exception("Library error - reconnecting")
+                    else:
+                        # Other exceptions, re-raise
+                        raise
 
                 counter += 1
                 if counter >= _PING_INTERVAL:
                     counter = 0
-                    try:
-                        self.mqtt.ping()
-                        # Reset reconnect attempts on successful ping
-                        reconnect_attempts = 0
-                        reconnect_delay = 5
-                    except Exception as ping_error:
-                        print(f"Ping failed: {ping_error}")
-                        raise Exception("Connection lost - ping failed")
+
+                    # Verify connection state before pinging
+                    if not self.connected or not self.mqtt:
+                        raise Exception("Connection not established")
+
+                    # Try ping up to 2 times before giving up
+                    ping_failed = False
+                    for ping_attempt in range(2):
+                        try:
+                            self.mqtt.ping()
+                            # Reset reconnect attempts on successful ping
+                            reconnect_attempts = 0
+                            reconnect_delay = 5
+                            ping_failed = False
+                            break
+                        except Exception as ping_error:
+                            ping_failed = True
+                            if ping_attempt == 0:
+                                print(
+                                    f"Ping failed (attempt 1/2): {ping_error}, retrying..."
+                                )
+                                time.sleep(1)  # Brief delay before retry
+                            else:
+                                print(f"Ping failed (attempt 2/2): {ping_error}")
+
+                    if ping_failed:
+                        raise Exception("Connection lost - ping failed after retries")
 
             except Exception as e:
-                print(f"MQTT connection lost: {e}")
+                error_str = str(e)
+
+                # Handle specific library bug gracefully
+                if (
+                    "bytes index out of range" in error_str
+                    or "index out of range" in error_str
+                ):
+                    print(f"MQTT library error (likely malformed packet): {e}")
+                    print("Attempting to recover by reconnecting...")
+                else:
+                    print(f"MQTT connection lost: {e}")
 
                 reconnect_attempts += 1
                 print(f"Attempting to reconnect (attempt {reconnect_attempts})")
