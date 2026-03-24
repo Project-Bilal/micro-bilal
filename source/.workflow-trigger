@@ -1,1 +1,2 @@
 Trigger deploy workflow after workflow hardening update.
+Trigger deploy workflow after pipefail detection fix.
