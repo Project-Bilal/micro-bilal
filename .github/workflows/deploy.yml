@@ -12,9 +12,30 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+
+      - name: Detect deployable files
+        id: detect_files
+        run: |
+          app_count=$(ls source/*.py 2>/dev/null | wc -l | xargs)
+          fw_count=$(ls firmware/*.bin 2>/dev/null | wc -l | xargs)
+
+          if [ "$app_count" -gt 0 ]; then
+            echo "has_app=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_app=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [ "$fw_count" -gt 0 ]; then
+            echo "has_fw=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_fw=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "Detected $app_count app files and $fw_count firmware files."
 
       - name: Copy app files via SCP
+        if: steps.detect_files.outputs.has_app == 'true'
         uses: appleboy/scp-action@master
         with:
           host: 34.53.103.114
@@ -25,6 +46,7 @@ jobs:
           strip_components: 1
 
       - name: Copy firmware files via SCP
+        if: steps.detect_files.outputs.has_fw == 'true'
         uses: appleboy/scp-action@master
         with:
           host: 34.53.103.114
@@ -35,23 +57,28 @@ jobs:
           strip_components: 1
 
       - name: Move files and set permissions
+        if: steps.detect_files.outputs.has_app == 'true' || steps.detect_files.outputs.has_fw == 'true'
         uses: appleboy/ssh-action@master
         with:
           host: 34.53.103.114
           username: ${{ secrets.SERVER_USERNAME }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
-            # Deploy app files
-            sudo mkdir -p /var/www/html/app
-            sudo cp ~/micro-bilal-deploy/app/*.py /var/www/html/app/
-            sudo chmod 644 /var/www/html/app/*.py
-            sudo chown www-data:www-data /var/www/html/app/*.py
+            # Deploy app files if present.
+            if compgen -G ~/micro-bilal-deploy/app/*.py > /dev/null; then
+              sudo mkdir -p /var/www/html/app
+              sudo cp ~/micro-bilal-deploy/app/*.py /var/www/html/app/
+              sudo chmod 644 /var/www/html/app/*.py
+              sudo chown www-data:www-data /var/www/html/app/*.py
+            fi
 
-            # Deploy firmware files
-            sudo mkdir -p /var/www/html/firmware
-            sudo cp ~/micro-bilal-deploy/firmware/*.bin /var/www/html/firmware/
-            sudo chmod 644 /var/www/html/firmware/*.bin
-            sudo chown www-data:www-data /var/www/html/firmware/*.bin
+            # Deploy firmware files if present.
+            if compgen -G ~/micro-bilal-deploy/firmware/*.bin > /dev/null; then
+              sudo mkdir -p /var/www/html/firmware
+              sudo cp ~/micro-bilal-deploy/firmware/*.bin /var/www/html/firmware/
+              sudo chmod 644 /var/www/html/firmware/*.bin
+              sudo chown www-data:www-data /var/www/html/firmware/*.bin
+            fi
 
             # Cleanup temp directory
             rm -rf ~/micro-bilal-deploy
