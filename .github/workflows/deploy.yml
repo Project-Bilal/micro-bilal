@@ -17,8 +17,11 @@ jobs:
       - name: Detect deployable files
         id: detect_files
         run: |
-          app_count=$(ls source/*.py 2>/dev/null | wc -l | xargs)
-          fw_count=$(ls firmware/*.bin 2>/dev/null | wc -l | xargs)
+          shopt -s nullglob
+          app_files=(source/*.py)
+          fw_files=(firmware/*.bin)
+          app_count=${#app_files[@]}
+          fw_count=${#fw_files[@]}
 
           if [ "$app_count" -gt 0 ]; then
             echo "has_app=true" >> "$GITHUB_OUTPUT"
