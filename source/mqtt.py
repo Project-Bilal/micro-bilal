@@ -1,5 +1,5 @@
 from umqtt.simple import MQTTClient
-from utils import led_toggle, check_reset_button, clear_device_state
+from utils import led_toggle, check_reset_button, clear_device_state, ntfy_alert
 from cast import Chromecast
 import utime as time
 import json
@@ -118,11 +118,16 @@ class MQTTHandler(object):
             ip = props.get("ip")
             port = props.get("port")
             volume = props.get("volume")
+            label = props.get("label", "audio")
 
             if all([url, ip, port]):
+                ntfy_alert(
+                    "[ESP32 %s] Received play: %s" % (self.id, label),
+                    topic="projectbilal-events",
+                )
                 # Clean up the IP string (remove whitespace/newlines)
                 ip = str(ip).strip()
-                self.play(url=url, ip=ip, port=port, vol=volume)
+                self.play(url=url, ip=ip, port=port, vol=volume, label=label)
 
         if action == "update":
             url = props.get("url")
@@ -235,7 +240,10 @@ class MQTTHandler(object):
             if failed_files:
                 print("=" * 40)
                 print("Download failed - aborting update")
-                print(f"  Failed: {failed_files}")
+                print("  Failed: %s" % failed_files)
+                ntfy_alert(
+                    "[ESP32 %s] App update failed: %s" % (self.id, failed_files),
+                )
                 print("  No files were modified")
                 print("=" * 40)
                 print("Reconnecting to MQTT...")
@@ -288,10 +296,14 @@ class MQTTHandler(object):
             # Report results
             print("=" * 40)
             print("App update complete - all files updated successfully")
-            print(f"  Updated: {updated_files}")
+            print("  Updated: %s" % updated_files)
             print("=" * 40)
 
             if updated_files:
+                ntfy_alert(
+                    "[ESP32 %s] App updated: %s" % (self.id, ", ".join(updated_files)),
+                    topic="projectbilal-events",
+                )
                 print("Rebooting with updated files...")
                 print("Reboot will occur after returning from callback...")
                 self.reboot_requested = True
@@ -338,16 +350,30 @@ class MQTTHandler(object):
                         "total_found": len(devices),
                     }
                     self.mqtt.publish(topic, json.dumps(summary_message))
-                    print(f"Discovery completed, found {len(devices)} devices total")
+                    print("Discovery completed, found %s devices total" % len(devices))
+                    ntfy_alert(
+                        "[ESP32 %s] Discovery: %s devices found" % (self.id, len(devices)),
+                        topic="projectbilal-events",
+                    )
                 elif len(devices) == 0:
                     no_devices_message = {"chromecasts": []}
                     self.mqtt.publish(topic, json.dumps(no_devices_message))
                     print("Discovery completed, no devices found")
+                    ntfy_alert(
+                        "[ESP32 %s] Discovery: 0 devices found" % self.id,
+                        topic="projectbilal-events",
+                    )
+                else:
+                    ntfy_alert(
+                        "[ESP32 %s] Discovery: 1 device found" % self.id,
+                        topic="projectbilal-events",
+                    )
 
             except Exception as e:
                 error_response = {"error": str(e)}
                 self.mqtt.publish(topic, json.dumps(error_response))
-                print(f"Discovery failed: {e}")
+                print("Discovery failed: %s" % e)
+                ntfy_alert("[ESP32 %s] Discovery failed: %s" % (self.id, e))
             finally:
                 self.discovery_in_progress = False
                 gc.collect()
@@ -366,6 +392,10 @@ class MQTTHandler(object):
                 # Send confirmation back
                 message = {"status": "success", "message": "WiFi credentials deleted"}
                 self.mqtt.publish(topic, json.dumps(message))
+                ntfy_alert(
+                    "[ESP32 %s] WiFi credentials deleted" % self.id,
+                    topic="projectbilal-events",
+                )
 
                 # Wait a moment for message to be sent, then reboot
                 time.sleep(3)
@@ -376,12 +406,15 @@ class MQTTHandler(object):
             except Exception as e:
                 error_response = {
                     "status": "error",
-                    "message": f"Failed to delete WiFi credentials: {str(e)}",
+                    "message": "Failed to delete WiFi credentials: %s" % str(e),
                 }
                 self.mqtt.publish(topic, json.dumps(error_response))
-                print(f"Failed to delete WiFi credentials: {e}")
+                print("Failed to delete WiFi credentials: %s" % e)
+                ntfy_alert(
+                    "[ESP32 %s] Delete WiFi credentials failed: %s" % (self.id, e),
+                )
 
-    def play(self, url, ip, port, vol):
+    def play(self, url, ip, port, vol, label="audio"):
         device = None
         try:
             print(
@@ -408,9 +441,14 @@ class MQTTHandler(object):
                 time.sleep(5)
 
             print("MQTT: Audio playback initiated")
+            ntfy_alert(
+                "[ESP32 %s] Playing %s on Chromecast" % (self.id, label),
+                topic="projectbilal-events",
+            )
 
         except Exception as e:
-            print(f"MQTT: Chromecast error: {e}")
+            print("MQTT: Chromecast error: %s" % e)
+            ntfy_alert("[ESP32 %s] Chromecast play failed: %s" % (self.id, e))
             import sys
 
             sys.print_exception(e)
@@ -536,6 +574,10 @@ class MQTTHandler(object):
                     success = self.mqtt_connect()
                     if success:
                         print("Reconnection successful!")
+                        ntfy_alert(
+                            "[ESP32 %s] Reconnected after disconnect" % self.id,
+                            topic="projectbilal-events",
+                        )
                         # Send online status after successful reconnection
                         self.send_status_update("online")
                         reconnect_attempts = 0
@@ -543,10 +585,18 @@ class MQTTHandler(object):
                         counter = 0  # Reset counter
                     else:
                         print("Reconnection failed")
+                        ntfy_alert(
+                            "[ESP32 %s] MQTT reconnect failed after %s attempts"
+                            % (self.id, reconnect_attempts),
+                        )
                         # Exponential backoff: double the delay for next attempt
                         reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
 
                 except Exception as reconnect_error:
-                    print(f"Reconnection attempt failed: {reconnect_error}")
+                    print("Reconnection attempt failed: %s" % reconnect_error)
+                    ntfy_alert(
+                        "[ESP32 %s] MQTT reconnect failed after %s attempts"
+                        % (self.id, reconnect_attempts),
+                    )
                     # Exponential backoff: double the delay for next attempt
                     reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)

@@ -44,6 +44,19 @@ def led_off():
     _LED.off()
 
 
+_NTFY_BASE = "http://34.53.103.114"
+
+
+def ntfy_alert(message, topic="projectbilal-errors"):
+    try:
+        import urequests
+
+        url = "%s/%s" % (_NTFY_BASE, topic)
+        urequests.post(url, data=message, headers={"Title": "Bilal ESP32"})
+    except Exception:
+        pass
+
+
 # get mac address for mqtt connection
 def get_mac():
     mac_hex = machine.unique_id()
