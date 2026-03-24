@@ -1,3 +1,4 @@
 Trigger deploy workflow after workflow hardening update.
 Trigger deploy workflow after pipefail detection fix.
 Trigger deploy workflow after POSIX shell compatibility fix.
+Trigger deploy workflow after provisioning new GitHub Actions SSH key.
