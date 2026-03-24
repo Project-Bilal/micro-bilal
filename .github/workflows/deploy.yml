@@ -68,7 +68,7 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
             # Deploy app files if present.
-            if compgen -G ~/micro-bilal-deploy/app/*.py > /dev/null; then
+            if ls ~/micro-bilal-deploy/app/*.py > /dev/null 2>&1; then
               sudo mkdir -p /var/www/html/app
               sudo cp ~/micro-bilal-deploy/app/*.py /var/www/html/app/
               sudo chmod 644 /var/www/html/app/*.py
@@ -76,7 +76,7 @@ jobs:
             fi
 
             # Deploy firmware files if present.
-            if compgen -G ~/micro-bilal-deploy/firmware/*.bin > /dev/null; then
+            if ls ~/micro-bilal-deploy/firmware/*.bin > /dev/null 2>&1; then
               sudo mkdir -p /var/www/html/firmware
               sudo cp ~/micro-bilal-deploy/firmware/*.bin /var/www/html/firmware/
               sudo chmod 644 /var/www/html/firmware/*.bin
