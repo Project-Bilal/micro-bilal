@@ -79,6 +79,9 @@ class Chromecast(object):
         self._send(_frame(_NS_CONN, b'{"type":"CONNECT"}'))
         self._send(_frame(_NS_RECV, b'{"type":"GET_STATUS","requestId":1}'))
 
+        # After handshake, use shorter timeout for message polling
+        self._sock.settimeout(3)
+
     # --- Low-Level Socket Operations (for MicroPython reliability) ---
 
     def _send(self, data):
@@ -157,12 +160,7 @@ class Chromecast(object):
         else:
             url_b = url
 
-        # 1. Set volume on base receiver (before launching app)
-        if volume is not None:
-            self.set_volume(volume)
-            print(f"Volume set to {volume} on base receiver")
-
-        # 2. Launch the Default Media Receiver app
+        # 1. Launch the Default Media Receiver app
         self._send(
             _frame(
                 _NS_RECV,
@@ -172,14 +170,21 @@ class Chromecast(object):
             )
         )
 
-        # 3. Wait for the new session's transport ID
-        transport_id = self._wait_for_transport_id(timeout_ms=5000)
+        # 2. Wait for the new session's transport ID
+        transport_id = self._wait_for_transport_id(timeout_ms=8000)
         if not transport_id:
             print("Error: Failed to get transport ID for new session.")
             return False
 
-        # 4. Connect to the specific media session transport
+        # 3. Connect to the media session transport
         self._send(_frame(_NS_CONN, b'{"type":"CONNECT"}', dest=transport_id))
+
+        # 4. Set volume AFTER app is running (before loading media)
+        if volume is not None:
+            self.set_volume(volume)
+            time.sleep(0.3)  # Let volume settle before loading media
+            print(f"Volume set to {volume} after app launch")
+
         self._send(
             _frame(_NS_MEDIA, b'{"type":"GET_STATUS","requestId":4}', dest=transport_id)
         )
@@ -200,15 +205,18 @@ class Chromecast(object):
         )
         self._send(_frame(_NS_MEDIA, load_payload, dest=transport_id))
 
-        # 6. Check for successful MEDIA_STATUS response
-        for _ in range(6):
+        # 6. Wait for MEDIA_STATUS confirmation with timeout
+        start = self._ticks_ms()
+        timeout_ms = 8000  # 8 seconds total for confirmation
+        while self._ticks_diff(self._ticks_ms(), start) < timeout_ms:
             try:
                 status = self.read_message()
             except OSError:
-                break
-            # Look for the MEDIA_STATUS type and the custom title to confirm load
+                time.sleep(0.3)
+                continue  # Retry on socket timeout, don't give up
             if b'"type":"MEDIA_STATUS"' in status and b'"Bilal Cast"' in status:
                 return True
+            time.sleep(0.2)  # Brief delay to avoid busy-looping
 
         return False
 
@@ -224,7 +232,8 @@ class Chromecast(object):
             try:
                 msg = self.read_message()
             except OSError:
-                break
+                time.sleep(0.3)
+                continue  # Don't abort on single socket timeout
 
             # CRITICAL FIX: Ensure the message is for the Default Media Receiver app
             if _DEFAULT_MEDIA_APP_ID in msg:

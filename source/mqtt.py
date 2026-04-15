@@ -23,6 +23,14 @@ class MQTTHandler(object):
         self.connected = False
         self.reboot_requested = False
         self.discovery_in_progress = False
+        self._play_in_progress = False
+        self._last_play_url = None
+        self._last_play_time = 0
+        self._dedup_window = 10  # seconds
+        self._play_count = 0
+        self._play_confirmed_count = 0
+        self._error_count = 0
+        self._start_time = time.time()
         self.lwt_topic = f"projectbilal/{self.id}/status"
         self.lwt_message = json.dumps(
             {
@@ -103,6 +111,25 @@ class MQTTHandler(object):
             return
 
         if action == "play":
+            # Reject if a play is already in progress
+            if self._play_in_progress:
+                print("MQTT: Play already in progress, ignoring")
+                return
+
+            url = props.get("url")
+
+            # Deduplication: reject duplicate play commands within window
+            now = time.time()
+            if url == self._last_play_url and (now - self._last_play_time) < self._dedup_window:
+                print("MQTT: Ignoring duplicate play command (within %ds window)" % self._dedup_window)
+                ntfy_alert(
+                    "[ESP32 %s] Duplicate play rejected: %s" % (self.id, props.get("label", "audio")),
+                    topic="projectbilal-events",
+                )
+                return
+            self._last_play_url = url
+            self._last_play_time = now
+
             # Wait if discovery is in progress to prevent socket exhaustion
             if self.discovery_in_progress:
                 print("Waiting for discovery to complete before playing...")
@@ -114,7 +141,6 @@ class MQTTHandler(object):
                 if self.discovery_in_progress:
                     print("Discovery still in progress, proceeding anyway")
 
-            url = props.get("url")
             ip = props.get("ip")
             port = props.get("port")
             volume = props.get("volume")
@@ -127,7 +153,11 @@ class MQTTHandler(object):
                 )
                 # Clean up the IP string (remove whitespace/newlines)
                 ip = str(ip).strip()
-                self.play(url=url, ip=ip, port=port, vol=volume, label=label)
+                self._play_in_progress = True
+                try:
+                    self.play(url=url, ip=ip, port=port, vol=volume, label=label)
+                finally:
+                    self._play_in_progress = False
 
         if action == "update":
             url = props.get("url")
@@ -415,42 +445,52 @@ class MQTTHandler(object):
                 )
 
     def play(self, url, ip, port, vol, label="audio"):
+        import gc
         device = None
+        playback_confirmed = False
+        self._play_count += 1
         try:
             print(
                 f"MQTT: Playing audio - URL: {url}, IP: {ip}, Port: {port}, Vol: {vol}"
             )
 
+            # Free memory before allocating cast sockets
+            gc.collect()
+
             # Create single Chromecast connection
             device = Chromecast(ip, port)
 
-            # Play URL with volume (volume is set after media loads)
+            # Play URL with volume (volume is set after app launch, before media load)
+            if vol is not None:
+                ntfy_alert(
+                    "[ESP32 %s] Volume set to %s for %s" % (self.id, vol, label),
+                    topic="projectbilal-events",
+                )
             playback_confirmed = device.play_url(url, volume=vol)
 
-            # Wait for audio to start before disconnecting
-            # If playback wasn't confirmed, wait longer to give Chromecast time
             if playback_confirmed:
-                # Confirmed - audio should start soon, wait a bit
+                self._play_confirmed_count += 1
                 time.sleep(2)
                 print("MQTT: Audio playback confirmed, starting...")
+                ntfy_alert(
+                    "[ESP32 %s] Playback confirmed: %s" % (self.id, label),
+                    topic="projectbilal-events",
+                )
             else:
-                # Not confirmed - Chromecast might be slow, wait longer
                 print(
                     "MQTT: Playback not confirmed, waiting longer for Chromecast to start..."
                 )
                 time.sleep(5)
-
-            print("MQTT: Audio playback initiated")
-            ntfy_alert(
-                "[ESP32 %s] Playing %s on Chromecast" % (self.id, label),
-                topic="projectbilal-events",
-            )
+                ntfy_alert(
+                    "[ESP32 %s] Playback NOT confirmed: %s" % (self.id, label),
+                    topic="projectbilal-events",
+                )
 
         except Exception as e:
+            self._error_count += 1
             print("MQTT: Chromecast error: %s" % e)
             ntfy_alert("[ESP32 %s] Chromecast play failed: %s" % (self.id, e))
             import sys
-
             sys.print_exception(e)
 
         finally:
@@ -462,16 +502,36 @@ class MQTTHandler(object):
                 except Exception as disconnect_e:
                     print(f"MQTT: Error during disconnect: {disconnect_e}")
 
+            # Report playback result to MQTT status topic
+            try:
+                if self.connected and self.mqtt:
+                    result = json.dumps({
+                        "type": "playback_result",
+                        "confirmed": playback_confirmed,
+                        "label": label,
+                        "timestamp": time.time(),
+                    })
+                    self.mqtt.publish(self.lwt_topic, result)
+            except Exception:
+                pass  # Best-effort reporting
+
     def mqtt_run(self):
         print("Connected and listening to MQTT Broker")
         counter = 0
+        health_counter = 0
         reconnect_attempts = 0
         reconnect_delay = 5  # Start with 5 seconds
         max_reconnect_delay = 60  # Max 60 seconds between attempts
+        _HEALTH_INTERVAL = 600  # Publish health every ~600 seconds (~10 minutes)
+
+        # Enable hardware watchdog (120s timeout)
+        from machine import WDT, Pin
+        wdt = WDT(timeout=120000)
 
         while True:
             try:
                 time.sleep(1)
+                wdt.feed()
 
                 # Check if reboot was requested during message handling
                 if self.reboot_requested:
@@ -480,8 +540,6 @@ class MQTTHandler(object):
                     machine.reset()
 
                 # Check for factory reset button (non-blocking check every second)
-                from machine import Pin
-
                 button = Pin(0, Pin.IN, Pin.PULL_UP)
                 if button.value() == 0:  # Button pressed
                     if check_reset_button():
@@ -490,41 +548,52 @@ class MQTTHandler(object):
                         time.sleep(1)
                         machine.reset()
 
-                # Check for messages with better error handling
+                # Check for messages
                 try:
                     self.mqtt.check_msg()
                 except OSError as e:
-                    # Network-level errors (connection lost, reset, etc.)
-                    if e.args[0] in [104, 113, -1]:
-                        raise Exception(f"Network error: {e}")
-                    else:
-                        # Other OSErrors might be recoverable, log and continue
-                        print(f"Network warning: {e}, continuing...")
+                    # All OSErrors from check_msg indicate connection issues
+                    print(f"Network error during check_msg: {e}")
+                    raise Exception(f"Network error: {e}")
                 except Exception as e:
-                    # Handle "bytes index out of range" and other library bugs
                     error_str = str(e)
                     if "index out of range" in error_str or "bytes index" in error_str:
                         print(f"MQTT library error (malformed packet): {e}")
-                        print("Reconnecting to recover...")
                         raise Exception("Library error - reconnecting")
                     else:
-                        # Other exceptions, re-raise
                         raise
 
                 counter += 1
+                health_counter += 1
+
+                # Periodic health reporting
+                if health_counter >= _HEALTH_INTERVAL:
+                    health_counter = 0
+                    try:
+                        import gc
+                        health = json.dumps({
+                            "type": "health",
+                            "uptime": int(time.time() - self._start_time),
+                            "plays": self._play_count,
+                            "confirmed": self._play_confirmed_count,
+                            "errors": self._error_count,
+                            "free_mem": gc.mem_free(),
+                            "firmware": FIRMWARE_VERSION,
+                        })
+                        self.mqtt.publish(f"projectbilal/{self.id}/health", health)
+                    except Exception:
+                        pass  # Best-effort
+
                 if counter >= _PING_INTERVAL:
                     counter = 0
 
-                    # Verify connection state before pinging
                     if not self.connected or not self.mqtt:
                         raise Exception("Connection not established")
 
-                    # Try ping up to 2 times before giving up
                     ping_failed = False
                     for ping_attempt in range(2):
                         try:
                             self.mqtt.ping()
-                            # Reset reconnect attempts on successful ping
                             reconnect_attempts = 0
                             reconnect_delay = 5
                             ping_failed = False
@@ -535,7 +604,7 @@ class MQTTHandler(object):
                                 print(
                                     f"Ping failed (attempt 1/2): {ping_error}, retrying..."
                                 )
-                                time.sleep(1)  # Brief delay before retry
+                                time.sleep(1)
                             else:
                                 print(f"Ping failed (attempt 2/2): {ping_error}")
 
@@ -543,9 +612,10 @@ class MQTTHandler(object):
                         raise Exception("Connection lost - ping failed after retries")
 
             except Exception as e:
+                self.connected = False  # Mark disconnected immediately
+                self._error_count += 1
                 error_str = str(e)
 
-                # Handle specific library bug gracefully
                 if (
                     "bytes index out of range" in error_str
                     or "index out of range" in error_str
@@ -558,6 +628,15 @@ class MQTTHandler(object):
                 reconnect_attempts += 1
                 print(f"Attempting to reconnect (attempt {reconnect_attempts})")
 
+                # Reboot safety valve after too many failures
+                if reconnect_attempts >= 10:
+                    print("Too many reconnect failures, rebooting...")
+                    ntfy_alert(
+                        "[ESP32 %s] Rebooting after %d reconnect failures" % (self.id, reconnect_attempts)
+                    )
+                    time.sleep(2)
+                    machine.reset()
+
                 # Clean up current connection
                 try:
                     if self.mqtt:
@@ -568,8 +647,28 @@ class MQTTHandler(object):
                 # Wait before reconnecting
                 print(f"Waiting {reconnect_delay} seconds before reconnect...")
                 time.sleep(reconnect_delay)
+                wdt.feed()
 
-                # Attempt to reconnect
+                # Verify WiFi before MQTT reconnect
+                import network
+                wlan = network.WLAN(network.STA_IF)
+                if not wlan.isconnected():
+                    print("WiFi disconnected, reconnecting WiFi first...")
+                    from utils import wifi_connect
+                    wifi_ip = wifi_connect()
+                    if not wifi_ip:
+                        print("WiFi reconnect failed, will retry...")
+                        ntfy_alert(
+                            "[ESP32 %s] WiFi reconnect failed (attempt %d)" % (self.id, reconnect_attempts),
+                        )
+                        reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
+                        continue
+                    ntfy_alert(
+                        "[ESP32 %s] WiFi reconnected before MQTT" % self.id,
+                        topic="projectbilal-events",
+                    )
+
+                # Attempt to reconnect MQTT
                 try:
                     success = self.mqtt_connect()
                     if success:
@@ -578,18 +677,17 @@ class MQTTHandler(object):
                             "[ESP32 %s] Reconnected after disconnect" % self.id,
                             topic="projectbilal-events",
                         )
-                        # Send online status after successful reconnection
                         self.send_status_update("online")
                         reconnect_attempts = 0
                         reconnect_delay = 5
-                        counter = 0  # Reset counter
+                        counter = 0
+                        health_counter = 0
                     else:
                         print("Reconnection failed")
                         ntfy_alert(
                             "[ESP32 %s] MQTT reconnect failed after %s attempts"
                             % (self.id, reconnect_attempts),
                         )
-                        # Exponential backoff: double the delay for next attempt
                         reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
 
                 except Exception as reconnect_error:
@@ -598,5 +696,4 @@ class MQTTHandler(object):
                         "[ESP32 %s] MQTT reconnect failed after %s attempts"
                         % (self.id, reconnect_attempts),
                     )
-                    # Exponential backoff: double the delay for next attempt
                     reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
