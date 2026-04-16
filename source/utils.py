@@ -308,7 +308,7 @@ async def device_scan(device_found_callback=None):
     return devices
 
 
-async def find_speaker_ip(speaker_name, timeout=5.0):
+async def find_speaker_ip(speaker_name, timeout=10.0):
     """
     One-shot mDNS query to resolve a specific Chromecast speaker's current IP.
     Returns {"ip": "...", "port": ...} or None if not found.

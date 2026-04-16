@@ -406,28 +406,41 @@ class MQTTHandler(object):
             import gc
             gc.collect()
 
+            # Read Appwrite API key from NVS first (before mDNS uses memory)
+            appwrite_key = None
+            try:
+                import esp32
+                nvs = esp32.NVS("appwrite")
+                buf = bytearray(512)
+                length = nvs.get_blob("api_key", buf)
+                appwrite_key = buf[:length].decode()
+                del buf
+            except Exception:
+                pass
+            gc.collect()
+
+            if not appwrite_key:
+                print("MQTT: No Appwrite API key in NVS, cannot report IP")
+                ntfy_alert(
+                    "[ESP32 %s] IP refresh: no API key in NVS" % self.id,
+                )
+                return
+
             try:
                 from utils import find_speaker_ip
                 result = asyncio.run(find_speaker_ip(speaker_name))
 
                 if result:
-                    # Read Appwrite API key from NVS (provisioned during onboarding)
-                    appwrite_key = None
+                    # Disconnect MQTT to free memory for HTTPS SSL handshake
                     try:
-                        import esp32
-                        nvs = esp32.NVS("appwrite")
-                        buf = bytearray(256)
-                        length = nvs.get_blob("api_key", buf)
-                        appwrite_key = buf[:length].decode()
+                        if self.mqtt:
+                            self.mqtt.disconnect()
+                            self.connected = False
+                            self.mqtt = None
+                            print("MQTT: Disconnected for Appwrite HTTPS call")
                     except Exception:
                         pass
-
-                    if not appwrite_key:
-                        print("MQTT: No Appwrite API key in NVS, cannot report IP")
-                        ntfy_alert(
-                            "[ESP32 %s] IP refresh found %s but no API key in NVS" % (self.id, result["ip"]),
-                        )
-                        return
+                    gc.collect()
 
                     import urequests
                     payload = json.dumps({
@@ -446,6 +459,8 @@ class MQTTHandler(object):
                     r = urequests.post(appwrite_endpoint, data=body, headers=headers)
                     print(f"MQTT: IP refresh reported to Appwrite (status {r.status_code})")
                     r.close()
+                    del r, body, headers, payload
+                    gc.collect()
 
                     ntfy_alert(
                         "[ESP32 %s] IP refreshed: %s -> %s:%s" % (self.id, speaker_name, result["ip"], result["port"]),
