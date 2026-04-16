@@ -235,12 +235,16 @@ class MQTTHandler(object):
             import os
             import gc
 
-            # Phase 1: Download ALL files first (atomic - all or nothing)
-            print("Phase 1: Downloading all files...")
-            downloaded_files = {}  # filename -> content
+            # Download and write each file with streaming to avoid RAM exhaustion.
+            # Files are backed up first so a failed download can be rolled back.
+            updated_files = []
             failed_files = []
 
             for filename in files:
+                file_path = "/" + filename
+                backup_path = "/" + filename + ".bak"
+                gc.collect()
+
                 try:
                     print(f"Downloading {filename}...")
                     file_url = base_url + filename
@@ -250,32 +254,55 @@ class MQTTHandler(object):
                         print(f"Failed to download {filename}: HTTP {r.status_code}")
                         failed_files.append(filename)
                         r.close()
-                        break  # Abort on first failure
+                        break
 
-                    content = r.content
+                    # Backup existing file before overwriting
+                    try:
+                        os.rename(file_path, backup_path)
+                    except:
+                        pass
+
+                    # Stream response to file in chunks to avoid OOM
+                    total = 0
+                    with open(file_path, "wb") as f:
+                        while True:
+                            chunk = r.raw.read(1024)
+                            if not chunk:
+                                break
+                            f.write(chunk)
+                            total += len(chunk)
                     r.close()
 
-                    downloaded_files[filename] = content
-                    print(f"Downloaded {filename} ({len(content)} bytes)")
+                    print(f"Downloaded and wrote {filename} ({total} bytes)")
+                    updated_files.append(filename)
 
-                    # Cleanup and delay between downloads
-                    gc.collect()
                     time.sleep(0.5)
 
                 except Exception as e:
-                    print(f"Error downloading {filename}: {e}")
+                    print(f"Error updating {filename}: {e}")
                     failed_files.append(filename)
-                    break  # Abort on first failure
+                    # Restore backup if download/write failed
+                    try:
+                        os.rename(backup_path, file_path)
+                        print(f"Restored backup for {filename}")
+                    except:
+                        pass
+                    break
 
-            # Check if all downloads succeeded
+            # If any file failed, roll back all updated files
             if failed_files:
                 print("=" * 40)
-                print("Download failed - aborting update")
+                print("Update failed, rolling back...")
+                for fn in updated_files:
+                    try:
+                        os.rename("/" + fn + ".bak", "/" + fn)
+                        print(f"  Rolled back {fn}")
+                    except:
+                        pass
                 print("  Failed: %s" % failed_files)
                 ntfy_alert(
                     "[ESP32 %s] App update failed: %s" % (self.id, failed_files),
                 )
-                print("  No files were modified")
                 print("=" * 40)
                 print("Reconnecting to MQTT...")
                 from utils import wifi_connect
@@ -283,38 +310,6 @@ class MQTTHandler(object):
                 wifi_connect()
                 self.mqtt_connect()
                 return
-
-            # Phase 2: All downloads succeeded - now write files
-            print("Phase 2: Writing files to filesystem...")
-            updated_files = []
-
-            for filename, content in downloaded_files.items():
-                backup_path = "/" + filename + ".bak"
-                file_path = "/" + filename
-
-                try:
-                    # Backup existing file
-                    try:
-                        os.rename(file_path, backup_path)
-                        print(f"Backed up {filename}")
-                    except:
-                        pass  # File might not exist, that's ok
-
-                    # Write new file
-                    with open(file_path, "wb") as f:
-                        f.write(content)
-
-                    print(f"Wrote {filename}")
-                    updated_files.append(filename)
-
-                except Exception as e:
-                    print(f"Error writing {filename}: {e}")
-                    # This shouldn't happen, but if it does, try to restore
-                    try:
-                        os.rename(backup_path, file_path)
-                        print(f"Restored backup for {filename}")
-                    except:
-                        pass
 
             # Clean up all backup files
             print("Cleaning up backup files...")
