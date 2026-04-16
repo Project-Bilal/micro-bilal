@@ -377,6 +377,25 @@ class MQTTHandler(object):
             #     self.discovery_in_progress = False
             #     gc.collect()
 
+        if action == "set_appwrite_key":
+            key = props.get("key")
+            if not key:
+                print("MQTT: set_appwrite_key missing key")
+                return
+            try:
+                import esp32
+                nvs = esp32.NVS("appwrite")
+                nvs.set_blob("api_key", key)
+                nvs.commit()
+                print("MQTT: Appwrite API key saved to NVS")
+                ntfy_alert(
+                    "[ESP32 %s] Appwrite API key provisioned" % self.id,
+                    topic="projectbilal-events",
+                )
+            except Exception as e:
+                print(f"MQTT: Failed to save Appwrite key to NVS: {e}")
+                ntfy_alert("[ESP32 %s] Failed to save Appwrite key: %s" % (self.id, e))
+
         if action == "refresh_ip":
             speaker_name = props.get("speaker_name")
             if not speaker_name:
@@ -392,11 +411,21 @@ class MQTTHandler(object):
                 result = asyncio.run(find_speaker_ip(speaker_name))
 
                 if result:
-                    appwrite_key = props.get("appwrite_key")
+                    # Read Appwrite API key from NVS (provisioned during onboarding)
+                    appwrite_key = None
+                    try:
+                        import esp32
+                        nvs = esp32.NVS("appwrite")
+                        buf = bytearray(256)
+                        length = nvs.get_blob("api_key", buf)
+                        appwrite_key = buf[:length].decode()
+                    except Exception:
+                        pass
+
                     if not appwrite_key:
-                        print("MQTT: No Appwrite API key in refresh message, cannot report IP")
+                        print("MQTT: No Appwrite API key in NVS, cannot report IP")
                         ntfy_alert(
-                            "[ESP32 %s] IP refresh found %s but no API key to report" % (self.id, result["ip"]),
+                            "[ESP32 %s] IP refresh found %s but no API key in NVS" % (self.id, result["ip"]),
                         )
                         return
 
@@ -442,6 +471,15 @@ class MQTTHandler(object):
                 nvs.erase_key("SSID")
                 nvs.erase_key("SECURITY")
                 print("WiFi credentials deleted from NVS")
+
+                # Clear Appwrite API key
+                try:
+                    nvs_appwrite = esp32.NVS("appwrite")
+                    nvs_appwrite.erase_key("api_key")
+                    nvs_appwrite.commit()
+                    print("Appwrite API key deleted from NVS")
+                except Exception:
+                    pass
 
                 # Send confirmation back
                 message = {"status": "success", "message": "WiFi credentials deleted"}

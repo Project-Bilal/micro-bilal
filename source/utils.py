@@ -378,6 +378,16 @@ def clear_device_state():
             pass
 
         nvs.commit()
+
+        # Clear Appwrite API key
+        try:
+            nvs_appwrite = esp32.NVS("appwrite")
+            nvs_appwrite.erase_key("api_key")
+            nvs_appwrite.commit()
+            print("  - Cleared Appwrite API key")
+        except:
+            pass
+
         print("Factory reset: NVS cleared successfully")
         return True
     except Exception as e:
