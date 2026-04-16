@@ -9,8 +9,8 @@ from ble import run_ble
 import machine
 from version import FIRMWARE_VERSION
 
-_PING_INTERVAL = const(10)  # this needs to be less than keepalive
-_KEEPALIVE = const(30)  # Reduced from 120 to 30 seconds for faster offline detection
+_PING_INTERVAL = const(15)  # this needs to be less than keepalive
+_KEEPALIVE = const(45)  # Relaxed now that mDNS is disabled — less overhead
 _MQTT_HOST = const("34.53.103.114")
 _MQTT_PORT = const(1883)
 
@@ -31,6 +31,7 @@ class MQTTHandler(object):
         self._error_count = 0
         self._start_time = time.time()
         self._pending_playback_result = None
+        self._post_cast_reconnect = False
         self.lwt_topic = f"projectbilal/{self.id}/status"
         self.lwt_message = json.dumps(
             {
@@ -482,6 +483,22 @@ class MQTTHandler(object):
             # Free SSL memory immediately
             gc.collect()
 
+            # Proactive WiFi health check after casting
+            # Casting often kills WiFi — detect and recover immediately
+            # instead of waiting for the next MQTT ping to fail
+            import network
+            wlan = network.WLAN(network.STA_IF)
+            if not wlan.isconnected():
+                print("MQTT: WiFi dropped after cast, resetting radio...")
+                from utils import wifi_connect
+                wifi_ip = wifi_connect()
+                if wifi_ip:
+                    print(f"MQTT: WiFi recovered with IP: {wifi_ip}")
+                    # Flag for fast reconnect in mqtt_run loop
+                    self._post_cast_reconnect = True
+                else:
+                    print("MQTT: WiFi recovery failed, will retry in main loop")
+
             # Report playback result to MQTT status topic
             # MQTT often drops after cast, so queue for reconnection if needed
             result = json.dumps({
@@ -613,8 +630,9 @@ class MQTTHandler(object):
                 reconnect_attempts += 1
                 print(f"Attempting to reconnect (attempt {reconnect_attempts})")
 
-                # Reboot safety valve after too many failures
-                if reconnect_attempts >= 10:
+                # Reboot safety valve — with mDNS disabled, 5 failures means
+                # something is seriously wrong
+                if reconnect_attempts >= 5:
                     print("Too many reconnect failures, rebooting...")
                     ntfy_alert(
                         "[ESP32 %s] Rebooting after %d reconnect failures" % (self.id, reconnect_attempts)
@@ -629,9 +647,15 @@ class MQTTHandler(object):
                 except:
                     pass
 
-                # Wait before reconnecting
-                print(f"Waiting {reconnect_delay} seconds before reconnect...")
-                time.sleep(reconnect_delay)
+                # Fast reconnect after casting (WiFi already recovered in play())
+                if self._post_cast_reconnect:
+                    self._post_cast_reconnect = False
+                    reconnect_delay = 2
+                    print("Fast reconnect after cast (2s)...")
+                    time.sleep(2)
+                else:
+                    print(f"Waiting {reconnect_delay} seconds before reconnect...")
+                    time.sleep(reconnect_delay)
                 wdt.feed()
 
                 # Verify WiFi before MQTT reconnect
