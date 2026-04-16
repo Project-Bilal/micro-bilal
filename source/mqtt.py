@@ -1,6 +1,5 @@
 from umqtt.simple import MQTTClient
 from utils import led_toggle, check_reset_button, clear_device_state, ntfy_alert
-from cast import Chromecast
 import utime as time
 import json
 from micropython import const
@@ -31,6 +30,7 @@ class MQTTHandler(object):
         self._play_confirmed_count = 0
         self._error_count = 0
         self._start_time = time.time()
+        self._pending_playback_result = None
         self.lwt_topic = f"projectbilal/{self.id}/status"
         self.lwt_message = json.dumps(
             {
@@ -350,64 +350,36 @@ class MQTTHandler(object):
             asyncio.run(run_ble())
 
         if action == "discover":
-            # Import device_scan here to avoid circular imports
-            from utils import device_scan
-            import gc
+            # mDNS discovery moved to mobile app to prevent WiFi instability.
+            # Respond immediately so older app versions don't hang.
+            response = {"discovery_complete": True, "total_found": 0}
+            self.mqtt.publish(topic, json.dumps(response))
+            print("Discovery delegated to mobile app")
 
-            # Send keepalive ping before starting long-running discovery
-            # This prevents false "offline" status during the 10-second scan
-            self.mqtt.ping()
-
-            self.discovery_in_progress = True
-            try:
-                print("Starting Chromecast discovery...")
-
-                # Create callback to send devices as they're found
-                def send_device_found(device_info):
-                    message = {"chromecasts": [device_info]}
-                    self.mqtt.publish(topic, json.dumps(message))
-                    print(f"Found device: {device_info['name']} at {device_info['ip']}")
-
-                # Run device scan with streaming callback
-                devices = asyncio.run(
-                    device_scan(device_found_callback=send_device_found)
-                )
-
-                # Send final summary
-                if len(devices) > 1:
-                    summary_message = {
-                        "discovery_complete": True,
-                        "total_found": len(devices),
-                    }
-                    self.mqtt.publish(topic, json.dumps(summary_message))
-                    print("Discovery completed, found %s devices total" % len(devices))
-                    ntfy_alert(
-                        "[ESP32 %s] Discovery: %s devices found" % (self.id, len(devices)),
-                        topic="projectbilal-events",
-                    )
-                elif len(devices) == 0:
-                    no_devices_message = {"chromecasts": []}
-                    self.mqtt.publish(topic, json.dumps(no_devices_message))
-                    print("Discovery completed, no devices found")
-                    ntfy_alert(
-                        "[ESP32 %s] Discovery: 0 devices found" % self.id,
-                        topic="projectbilal-events",
-                    )
-                else:
-                    ntfy_alert(
-                        "[ESP32 %s] Discovery: 1 device found" % self.id,
-                        topic="projectbilal-events",
-                    )
-
-            except Exception as e:
-                error_response = {"error": str(e)}
-                self.mqtt.publish(topic, json.dumps(error_response))
-                print("Discovery failed: %s" % e)
-                ntfy_alert("[ESP32 %s] Discovery failed: %s" % (self.id, e))
-            finally:
-                self.discovery_in_progress = False
-                gc.collect()
-                print("Discovery resources cleaned up")
+            # TODO: Cleanup — remove this commented block and device_scan() in utils.py
+            # once phone-side discovery is confirmed stable in production.
+            # Also remove mdns_client library files from device filesystem.
+            # --- Original ESP32 mDNS discovery (disabled) ---
+            # from utils import device_scan
+            # import gc
+            # self.mqtt.ping()
+            # self.discovery_in_progress = True
+            # try:
+            #     print("Starting Chromecast discovery...")
+            #     def send_device_found(device_info):
+            #         message = {"chromecasts": [device_info]}
+            #         self.mqtt.publish(topic, json.dumps(message))
+            #     devices = asyncio.run(
+            #         device_scan(device_found_callback=send_device_found)
+            #     )
+            #     summary_message = {"discovery_complete": True, "total_found": len(devices)}
+            #     self.mqtt.publish(topic, json.dumps(summary_message))
+            # except Exception as e:
+            #     error_response = {"error": str(e)}
+            #     self.mqtt.publish(topic, json.dumps(error_response))
+            # finally:
+            #     self.discovery_in_progress = False
+            #     gc.collect()
 
         if action == "delete_device":
             try:
@@ -457,6 +429,11 @@ class MQTTHandler(object):
             # Free memory before allocating cast sockets
             gc.collect()
 
+            # Lazy import to save baseline RAM
+            from cast import Chromecast
+
+            gc.collect()
+
             # Create single Chromecast connection
             device = Chromecast(ip, port)
 
@@ -502,18 +479,26 @@ class MQTTHandler(object):
                 except Exception as disconnect_e:
                     print(f"MQTT: Error during disconnect: {disconnect_e}")
 
+            # Free SSL memory immediately
+            gc.collect()
+
             # Report playback result to MQTT status topic
+            # MQTT often drops after cast, so queue for reconnection if needed
+            result = json.dumps({
+                "type": "playback_result",
+                "confirmed": playback_confirmed,
+                "label": label,
+                "timestamp": time.time(),
+            })
             try:
                 if self.connected and self.mqtt:
-                    result = json.dumps({
-                        "type": "playback_result",
-                        "confirmed": playback_confirmed,
-                        "label": label,
-                        "timestamp": time.time(),
-                    })
                     self.mqtt.publish(self.lwt_topic, result)
+                    print("MQTT: Playback result sent")
+                else:
+                    self._pending_playback_result = result
+                    print("MQTT: Playback result queued for after reconnect")
             except Exception:
-                pass  # Best-effort reporting
+                self._pending_playback_result = result
 
     def mqtt_run(self):
         print("Connected and listening to MQTT Broker")
@@ -678,6 +663,16 @@ class MQTTHandler(object):
                             topic="projectbilal-events",
                         )
                         self.send_status_update("online")
+
+                        # Flush any pending playback result from before disconnect
+                        if self._pending_playback_result:
+                            try:
+                                self.mqtt.publish(self.lwt_topic, self._pending_playback_result)
+                                print("MQTT: Sent pending playback result after reconnect")
+                            except Exception:
+                                pass
+                            self._pending_playback_result = None
+
                         reconnect_attempts = 0
                         reconnect_delay = 5
                         counter = 0

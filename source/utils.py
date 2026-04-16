@@ -256,11 +256,14 @@ def wifi_scan():
     return []
 
 
-# Scan for chromecast devices
+# TODO: Cleanup — mDNS discovery has been moved to the mobile app.
+# This function and the mdns_client library files on the device filesystem
+# can be removed once phone-side discovery is confirmed stable in production.
 async def device_scan(device_found_callback=None):
     # Import mDNS client libraries only when needed
     from mdns_client.service_discovery.txt_discovery import TXTServiceDiscovery
     from mdns_client.client import Client
+    import gc
 
     wlan = network.WLAN(network.STA_IF)
     ip = wlan.ifconfig()[0]
@@ -271,19 +274,35 @@ async def device_scan(device_found_callback=None):
     devices = []
     print("Starting Chromecast discovery for 10 seconds...")
 
-    results = await discovery.query_once("_googlecast", "_tcp", timeout=10.0)
+    try:
+        results = await discovery.query_once("_googlecast", "_tcp", timeout=10.0)
 
-    for device in results:
-        device_info = {
-            "name": device.txt_records["fn"][0],
-            "ip": device.ips.pop(),
-            "port": device.port,
-        }
-        devices.append(device_info)
+        for device in results:
+            try:
+                device_info = {
+                    "name": device.txt_records.get("fn", ["Unknown"])[0],
+                    "ip": device.ips.pop() if device.ips else None,
+                    "port": device.port,
+                }
+                if not device_info["ip"]:
+                    print("Skipping device with no IP address")
+                    continue
+                devices.append(device_info)
 
-        # Send device immediately as it's found (if callback provided)
-        if device_found_callback:
-            device_found_callback(device_info)
+                # Send device immediately as it's found (if callback provided)
+                if device_found_callback:
+                    device_found_callback(device_info)
+            except Exception as e:
+                print("Skipping malformed device: %s" % e)
+    finally:
+        # Close mDNS sockets to prevent leaks between scans
+        for obj in (discovery, client):
+            for method in ("close", "deinit"):
+                try:
+                    getattr(obj, method, lambda: None)()
+                except Exception:
+                    pass
+        gc.collect()
 
     print(f"Discovery complete, found {len(devices)} devices")
     return devices
