@@ -377,6 +377,62 @@ class MQTTHandler(object):
             #     self.discovery_in_progress = False
             #     gc.collect()
 
+        if action == "refresh_ip":
+            speaker_name = props.get("speaker_name")
+            if not speaker_name:
+                print("MQTT: refresh_ip missing speaker_name")
+                return
+
+            print(f"MQTT: Starting IP refresh for speaker '{speaker_name}'")
+            import gc
+            gc.collect()
+
+            try:
+                from utils import find_speaker_ip
+                result = asyncio.run(find_speaker_ip(speaker_name))
+
+                if result:
+                    appwrite_key = props.get("appwrite_key")
+                    if not appwrite_key:
+                        print("MQTT: No Appwrite API key in refresh message, cannot report IP")
+                        ntfy_alert(
+                            "[ESP32 %s] IP refresh found %s but no API key to report" % (self.id, result["ip"]),
+                        )
+                        return
+
+                    import urequests
+                    payload = json.dumps({
+                        "operation": "refresh_ip",
+                        "device_id": self.id,
+                        "ip_address": result["ip"],
+                        "port": str(result["port"]),
+                    })
+                    appwrite_endpoint = "https://fra.cloud.appwrite.io/v1/functions/device-handler/executions"
+                    headers = {
+                        "Content-Type": "application/json",
+                        "X-Appwrite-Project": "projectbilal",
+                        "X-Appwrite-Key": appwrite_key,
+                    }
+                    body = json.dumps({"body": payload, "async": False})
+                    r = urequests.post(appwrite_endpoint, data=body, headers=headers)
+                    print(f"MQTT: IP refresh reported to Appwrite (status {r.status_code})")
+                    r.close()
+
+                    ntfy_alert(
+                        "[ESP32 %s] IP refreshed: %s -> %s:%s" % (self.id, speaker_name, result["ip"], result["port"]),
+                        topic="projectbilal-events",
+                    )
+                else:
+                    ntfy_alert(
+                        "[ESP32 %s] IP refresh: speaker '%s' not found on network" % (self.id, speaker_name),
+                    )
+
+            except Exception as e:
+                print(f"MQTT: IP refresh failed: {e}")
+                ntfy_alert("[ESP32 %s] IP refresh failed: %s" % (self.id, e))
+            finally:
+                gc.collect()
+
         if action == "delete_device":
             try:
                 import esp32

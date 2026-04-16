@@ -308,6 +308,47 @@ async def device_scan(device_found_callback=None):
     return devices
 
 
+async def find_speaker_ip(speaker_name, timeout=5.0):
+    """
+    One-shot mDNS query to resolve a specific Chromecast speaker's current IP.
+    Returns {"ip": "...", "port": ...} or None if not found.
+    """
+    from mdns_client.service_discovery.txt_discovery import TXTServiceDiscovery
+    from mdns_client.client import Client
+    import gc
+
+    wlan = network.WLAN(network.STA_IF)
+    ip = wlan.ifconfig()[0]
+    client = Client(ip)
+    discovery = TXTServiceDiscovery(client)
+
+    try:
+        results = await discovery.query_once("_googlecast", "_tcp", timeout=timeout)
+
+        for device in results:
+            try:
+                fn = device.txt_records.get("fn", [""])[0]
+                if fn == speaker_name:
+                    device_ip = device.ips.pop() if device.ips else None
+                    if device_ip:
+                        print(f"mDNS: Found '{speaker_name}' at {device_ip}:{device.port}")
+                        return {"ip": device_ip, "port": device.port}
+            except Exception as e:
+                print(f"mDNS: Skipping malformed device: {e}")
+
+        print(f"mDNS: Speaker '{speaker_name}' not found")
+        return None
+
+    finally:
+        for obj in (discovery, client):
+            for method in ("close", "deinit"):
+                try:
+                    getattr(obj, method, lambda: None)()
+                except Exception:
+                    pass
+        gc.collect()
+
+
 def clear_device_state():
     """
     Clear all device configuration from NVS (factory reset).
