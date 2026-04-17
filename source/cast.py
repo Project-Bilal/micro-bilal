@@ -70,17 +70,22 @@ class Chromecast(object):
         self.ip = cast_ip
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._sock.settimeout(timeout_s)
+        self.s = None
 
-        # Connect and wrap socket with SSL
-        self._sock.connect((self.ip, cast_port))
-        self.s = ssl.wrap_socket(self._sock)
+        try:
+            # Connect and wrap socket with SSL
+            self._sock.connect((self.ip, cast_port))
+            self.s = ssl.wrap_socket(self._sock)
 
-        # Send initial CONNECT and GET_STATUS messages
-        self._send(_frame(_NS_CONN, b'{"type":"CONNECT"}'))
-        self._send(_frame(_NS_RECV, b'{"type":"GET_STATUS","requestId":1}'))
+            # Send initial CONNECT and GET_STATUS messages
+            self._send(_frame(_NS_CONN, b'{"type":"CONNECT"}'))
+            self._send(_frame(_NS_RECV, b'{"type":"GET_STATUS","requestId":1}'))
 
-        # After handshake, use shorter timeout for message polling
-        self._sock.settimeout(3)
+            # After handshake, use shorter timeout for message polling
+            self._sock.settimeout(3)
+        except Exception:
+            self.disconnect()
+            raise
 
     # --- Low-Level Socket Operations (for MicroPython reliability) ---
 
@@ -249,7 +254,8 @@ class Chromecast(object):
     def disconnect(self):
         """Close the connection to the Chromecast device."""
         try:
-            self.s.close()
+            if self.s:
+                self.s.close()
         finally:
             try:
                 self._sock.close()

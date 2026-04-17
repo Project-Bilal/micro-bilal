@@ -207,7 +207,7 @@ class MQTTHandler(object):
 
                 # Start OTA update
                 print("Starting firmware download and flash...")
-                ota.update.from_file(url=url, verify=False, reboot=True)
+                ota.update.from_file(url=url, verify=True, reboot=True)
 
         if action == "update_app":
             """
@@ -286,8 +286,8 @@ class MQTTHandler(object):
                     # Backup existing file before overwriting
                     try:
                         os.rename(file_path, backup_path)
-                    except:
-                        pass
+                    except Exception as e:
+                        print(f"No existing file to backup ({filename}): {e}")
 
                     # Stream response to file in chunks to avoid OOM
                     total = 0
@@ -312,8 +312,8 @@ class MQTTHandler(object):
                     try:
                         os.rename(backup_path, file_path)
                         print(f"Restored backup for {filename}")
-                    except:
-                        pass
+                    except Exception as e:
+                        print(f"WARNING: Could not restore backup for {filename}: {e}")
                     break
 
             # If any file failed, roll back all updated files
@@ -324,8 +324,8 @@ class MQTTHandler(object):
                     try:
                         os.rename("/" + fn + ".bak", "/" + fn)
                         print(f"  Rolled back {fn}")
-                    except:
-                        pass
+                    except Exception as e:
+                        print(f"  WARNING: Rollback failed for {fn}: {e}")
                 print("  Failed: %s" % failed_files)
                 ntfy_alert(
                     "[ESP32 %s] App update failed: %s" % (self._label, failed_files),
@@ -382,31 +382,6 @@ class MQTTHandler(object):
             response = {"discovery_complete": True, "total_found": 0}
             self.mqtt.publish(topic, json.dumps(response))
             print("Discovery delegated to mobile app")
-
-            # TODO: Cleanup — remove this commented block and device_scan() in utils.py
-            # once phone-side discovery is confirmed stable in production.
-            # Also remove mdns_client library files from device filesystem.
-            # --- Original ESP32 mDNS discovery (disabled) ---
-            # from utils import device_scan
-            # import gc
-            # self.mqtt.ping()
-            # self.discovery_in_progress = True
-            # try:
-            #     print("Starting Chromecast discovery...")
-            #     def send_device_found(device_info):
-            #         message = {"chromecasts": [device_info]}
-            #         self.mqtt.publish(topic, json.dumps(message))
-            #     devices = asyncio.run(
-            #         device_scan(device_found_callback=send_device_found)
-            #     )
-            #     summary_message = {"discovery_complete": True, "total_found": len(devices)}
-            #     self.mqtt.publish(topic, json.dumps(summary_message))
-            # except Exception as e:
-            #     error_response = {"error": str(e)}
-            #     self.mqtt.publish(topic, json.dumps(error_response))
-            # finally:
-            #     self.discovery_in_progress = False
-            #     gc.collect()
 
         if action == "set_appwrite_key":
             key = props.get("key")
@@ -546,6 +521,7 @@ class MQTTHandler(object):
                 nvs.erase_key("PASSWORD")
                 nvs.erase_key("SSID")
                 nvs.erase_key("SECURITY")
+                nvs.commit()
                 print("WiFi credentials deleted from NVS")
 
                 # Clear Appwrite API key
@@ -767,6 +743,10 @@ class MQTTHandler(object):
                             "firmware": FIRMWARE_VERSION,
                         })
                         self.mqtt.publish(f"projectbilal/{self.id}/health", health)
+                        # Reset counters after successful report to prevent unbounded growth
+                        self._play_count = 0
+                        self._play_confirmed_count = 0
+                        self._error_count = 0
                     except Exception:
                         pass  # Best-effort
 
@@ -830,8 +810,9 @@ class MQTTHandler(object):
                 try:
                     if self.mqtt:
                         self.mqtt.disconnect()
-                except:
-                    pass
+                except Exception as e:
+                    print(f"MQTT disconnect error during cleanup: {e}")
+                self.mqtt = None  # Free socket even if disconnect failed
 
                 # Fast reconnect after casting (WiFi already recovered in play())
                 if self._post_cast_reconnect:
@@ -840,8 +821,13 @@ class MQTTHandler(object):
                     print("Fast reconnect after cast (2s)...")
                     time.sleep(2)
                 else:
+                    # Sleep in chunks to keep watchdog fed
                     print(f"Waiting {reconnect_delay} seconds before reconnect...")
-                    time.sleep(reconnect_delay)
+                    remaining = reconnect_delay
+                    while remaining > 0:
+                        time.sleep(min(remaining, 30))
+                        remaining -= 30
+                        wdt.feed()
                 wdt.feed()
 
                 # Verify WiFi before MQTT reconnect
@@ -849,6 +835,7 @@ class MQTTHandler(object):
                 wlan = network.WLAN(network.STA_IF)
                 if not wlan.isconnected():
                     print("WiFi disconnected, reconnecting WiFi first...")
+                    wdt.feed()
                     from utils import wifi_connect
                     wifi_ip = wifi_connect()
                     if not wifi_ip:
@@ -868,6 +855,7 @@ class MQTTHandler(object):
                     )
 
                 # Attempt to reconnect MQTT
+                wdt.feed()
                 try:
                     success = self.mqtt_connect()
                     if success:

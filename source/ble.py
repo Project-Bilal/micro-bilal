@@ -11,6 +11,7 @@ from utils import (
     wifi_connect,
     wifi_connect_with_creds,
     monitor_reset_button,
+    ntfy_alert,
 )  # Custom utility functions
 import machine  # Hardware control
 import bluetooth  # BLE functionality
@@ -120,6 +121,11 @@ async def control_task(connection, char):
                         # Connection failed - credentials never saved, no cleanup needed
                         print(
                             f"BLE: Failed to connect to '{SSID}' - credentials NOT saved"
+                        )
+                        ntfy_alert(
+                            "[ESP32] WiFi onboarding failed for SSID: %s" % SSID,
+                            priority=3,
+                            tags="warning",
                         )
 
                         # Inform app of failure
