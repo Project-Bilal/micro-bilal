@@ -14,6 +14,21 @@ import uasyncio as asyncio
 import mqtt
 
 
+def _get_device_label():
+    """Get device name from NVS for boot-time alerts, fallback to MAC."""
+    try:
+        import esp32
+        nvs = esp32.NVS("device")
+        buf = bytearray(128)
+        length = nvs.get_blob("name", buf)
+        name = buf[:length].decode()
+        if name:
+            return '"%s"' % name
+    except Exception:
+        pass
+    return get_mac()
+
+
 def startup():
     # Check for factory reset button on boot
     print("Checking for factory reset button...")
@@ -29,7 +44,7 @@ def startup():
         print("connected: ", ip)
         return True
     print("no WiFi connection")
-    ntfy_alert("[ESP32] WiFi failed at boot")
+    ntfy_alert("[ESP32] WiFi failed at boot", priority=4, tags="warning")
     return False
 
 
@@ -41,13 +56,14 @@ def main():
     wifi_success = startup()
     if wifi_success:
         device_id = get_mac()
+        label = _get_device_label()
         client = mqtt.MQTTHandler(device_id)
         conn = client.mqtt_connect()
         if conn:
-            ntfy_alert("[ESP32 %s] Online" % device_id, topic="projectbilal-events")
+            ntfy_alert("[ESP32 %s] Online" % label, topic="projectbilal-events", priority=2, tags="electric_plug")
             client.mqtt_run()
         else:
-            ntfy_alert("[ESP32 %s] MQTT connect failed" % device_id)
+            ntfy_alert("[ESP32 %s] MQTT connect failed" % label, priority=4, tags="warning")
     else:
         print("Starting bluetooth advertising...")
         asyncio.run(run_ble())
@@ -57,6 +73,6 @@ try:
     ota.rollback.cancel()
     main()
 except Exception as e:
-    ntfy_alert("[ESP32] Boot crash: %s" % e)
+    ntfy_alert("[ESP32] Boot crash: %s" % e, priority=4, tags="warning")
     time.sleep(1)
     machine.reset()

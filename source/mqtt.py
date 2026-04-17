@@ -19,6 +19,7 @@ class MQTTHandler(object):
     def __init__(self, id):
         self.mqtt = None
         self.id = id
+        self.device_name = self._load_device_name()
         self.connected = False
         self.reboot_requested = False
         self.discovery_in_progress = False
@@ -40,6 +41,28 @@ class MQTTHandler(object):
                 "firmware_version": FIRMWARE_VERSION,
             }
         )
+
+    def _load_device_name(self):
+        """Load device name from NVS, fallback to MAC address."""
+        try:
+            import esp32
+            nvs = esp32.NVS("device")
+            buf = bytearray(128)
+            length = nvs.get_blob("name", buf)
+            name = buf[:length].decode()
+            if name:
+                print(f"Device name loaded from NVS: {name}")
+                return name
+        except Exception:
+            pass
+        return self.id
+
+    @property
+    def _label(self):
+        """Short label for ntfy messages: name if set, otherwise MAC."""
+        if self.device_name != self.id:
+            return '"%s"' % self.device_name
+        return self.id
 
     def mqtt_connect(self):
         self.mqtt = MQTTClient(
@@ -124,8 +147,10 @@ class MQTTHandler(object):
             if url == self._last_play_url and (now - self._last_play_time) < self._dedup_window:
                 print("MQTT: Ignoring duplicate play command (within %ds window)" % self._dedup_window)
                 ntfy_alert(
-                    "[ESP32 %s] Duplicate play rejected: %s" % (self.id, props.get("label", "audio")),
+                    "[ESP32 %s] Duplicate play rejected: %s" % (self._label, props.get("label", "audio")),
                     topic="projectbilal-events",
+                    priority=2,
+                    tags="speaker",
                 )
                 return
             self._last_play_url = url
@@ -149,8 +174,10 @@ class MQTTHandler(object):
 
             if all([url, ip, port]):
                 ntfy_alert(
-                    "[ESP32 %s] Received play: %s" % (self.id, label),
+                    "[ESP32 %s] Received play: %s" % (self._label, label),
                     topic="projectbilal-events",
+                    priority=2,
+                    tags="speaker",
                 )
                 # Clean up the IP string (remove whitespace/newlines)
                 ip = str(ip).strip()
@@ -301,7 +328,9 @@ class MQTTHandler(object):
                         pass
                 print("  Failed: %s" % failed_files)
                 ntfy_alert(
-                    "[ESP32 %s] App update failed: %s" % (self.id, failed_files),
+                    "[ESP32 %s] App update failed: %s" % (self._label, failed_files),
+                    priority=4,
+                    tags="warning",
                 )
                 print("=" * 40)
                 print("Reconnecting to MQTT...")
@@ -327,8 +356,10 @@ class MQTTHandler(object):
 
             if updated_files:
                 ntfy_alert(
-                    "[ESP32 %s] App updated: %s" % (self.id, ", ".join(updated_files)),
+                    "[ESP32 %s] App updated: %s" % (self._label, ", ".join(updated_files)),
                     topic="projectbilal-events",
+                    priority=2,
+                    tags="package",
                 )
                 print("Rebooting with updated files...")
                 print("Reboot will occur after returning from callback...")
@@ -389,12 +420,36 @@ class MQTTHandler(object):
                 nvs.commit()
                 print("MQTT: Appwrite API key saved to NVS")
                 ntfy_alert(
-                    "[ESP32 %s] Appwrite API key provisioned" % self.id,
+                    "[ESP32 %s] Appwrite API key provisioned" % self._label,
                     topic="projectbilal-events",
+                    priority=2,
+                    tags="key",
                 )
             except Exception as e:
                 print(f"MQTT: Failed to save Appwrite key to NVS: {e}")
-                ntfy_alert("[ESP32 %s] Failed to save Appwrite key: %s" % (self.id, e))
+                ntfy_alert("[ESP32 %s] Failed to save Appwrite key: %s" % (self._label, e), priority=4, tags="warning")
+
+        if action == "set_device_name":
+            name = props.get("name")
+            if not name:
+                print("MQTT: set_device_name missing name")
+                return
+            try:
+                import esp32
+                nvs = esp32.NVS("device")
+                nvs.set_blob("name", name)
+                nvs.commit()
+                self.device_name = name
+                print(f"MQTT: Device name saved to NVS: {name}")
+                ntfy_alert(
+                    "[ESP32 %s] Device name set: %s" % (self.id, name),
+                    topic="projectbilal-events",
+                    priority=2,
+                    tags="label",
+                )
+            except Exception as e:
+                print(f"MQTT: Failed to save device name to NVS: {e}")
+                ntfy_alert("[ESP32 %s] Failed to save device name: %s" % (self.id, e), priority=4, tags="warning")
 
         if action == "refresh_ip":
             speaker_name = props.get("speaker_name")
@@ -422,7 +477,9 @@ class MQTTHandler(object):
             if not appwrite_key:
                 print("MQTT: No Appwrite API key in NVS, cannot report IP")
                 ntfy_alert(
-                    "[ESP32 %s] IP refresh: no API key in NVS" % self.id,
+                    "[ESP32 %s] IP refresh: no API key in NVS" % self._label,
+                    priority=4,
+                    tags="warning",
                 )
                 return
 
@@ -463,17 +520,21 @@ class MQTTHandler(object):
                     gc.collect()
 
                     ntfy_alert(
-                        "[ESP32 %s] IP refreshed: %s -> %s:%s" % (self.id, speaker_name, result["ip"], result["port"]),
+                        "[ESP32 %s] IP refreshed: %s -> %s:%s" % (self._label, speaker_name, result["ip"], result["port"]),
                         topic="projectbilal-events",
+                        priority=2,
+                        tags="arrows_counterclockwise",
                     )
                 else:
                     ntfy_alert(
-                        "[ESP32 %s] IP refresh: speaker '%s' not found on network" % (self.id, speaker_name),
+                        "[ESP32 %s] IP refresh: speaker '%s' not found on network" % (self._label, speaker_name),
+                        priority=3,
+                        tags="warning",
                     )
 
             except Exception as e:
                 print(f"MQTT: IP refresh failed: {e}")
-                ntfy_alert("[ESP32 %s] IP refresh failed: %s" % (self.id, e))
+                ntfy_alert("[ESP32 %s] IP refresh failed: %s" % (self._label, e), priority=4, tags="warning")
             finally:
                 gc.collect()
 
@@ -496,12 +557,23 @@ class MQTTHandler(object):
                 except Exception:
                     pass
 
+                # Clear device name
+                try:
+                    nvs_device = esp32.NVS("device")
+                    nvs_device.erase_key("name")
+                    nvs_device.commit()
+                    print("Device name deleted from NVS")
+                except Exception:
+                    pass
+
                 # Send confirmation back
                 message = {"status": "success", "message": "WiFi credentials deleted"}
                 self.mqtt.publish(topic, json.dumps(message))
                 ntfy_alert(
-                    "[ESP32 %s] WiFi credentials deleted" % self.id,
+                    "[ESP32 %s] WiFi credentials deleted" % self._label,
                     topic="projectbilal-events",
+                    priority=2,
+                    tags="wastebasket",
                 )
 
                 # Wait a moment for message to be sent, then reboot
@@ -518,7 +590,9 @@ class MQTTHandler(object):
                 self.mqtt.publish(topic, json.dumps(error_response))
                 print("Failed to delete WiFi credentials: %s" % e)
                 ntfy_alert(
-                    "[ESP32 %s] Delete WiFi credentials failed: %s" % (self.id, e),
+                    "[ESP32 %s] Delete WiFi credentials failed: %s" % (self._label, e),
+                    priority=4,
+                    tags="warning",
                 )
 
     def play(self, url, ip, port, vol, label="audio"):
@@ -545,8 +619,10 @@ class MQTTHandler(object):
             # Play URL with volume (volume is set after app launch, before media load)
             if vol is not None:
                 ntfy_alert(
-                    "[ESP32 %s] Volume set to %s for %s" % (self.id, vol, label),
+                    "[ESP32 %s] Volume set to %s for %s" % (self._label, vol, label),
                     topic="projectbilal-events",
+                    priority=2,
+                    tags="speaker",
                 )
             playback_confirmed = device.play_url(url, volume=vol)
 
@@ -555,8 +631,10 @@ class MQTTHandler(object):
                 time.sleep(2)
                 print("MQTT: Audio playback confirmed, starting...")
                 ntfy_alert(
-                    "[ESP32 %s] Playback confirmed: %s" % (self.id, label),
+                    "[ESP32 %s] Playback confirmed: %s" % (self._label, label),
                     topic="projectbilal-events",
+                    priority=2,
+                    tags="speaker",
                 )
             else:
                 print(
@@ -564,14 +642,16 @@ class MQTTHandler(object):
                 )
                 time.sleep(5)
                 ntfy_alert(
-                    "[ESP32 %s] Playback NOT confirmed: %s" % (self.id, label),
+                    "[ESP32 %s] Playback NOT confirmed: %s" % (self._label, label),
                     topic="projectbilal-events",
+                    priority=3,
+                    tags="warning",
                 )
 
         except Exception as e:
             self._error_count += 1
             print("MQTT: Chromecast error: %s" % e)
-            ntfy_alert("[ESP32 %s] Chromecast play failed: %s" % (self.id, e))
+            ntfy_alert("[ESP32 %s] Chromecast play failed: %s" % (self._label, e), priority=4, tags="warning")
             import sys
             sys.print_exception(e)
 
@@ -739,7 +819,9 @@ class MQTTHandler(object):
                 if reconnect_attempts >= 5:
                     print("Too many reconnect failures, rebooting...")
                     ntfy_alert(
-                        "[ESP32 %s] Rebooting after %d reconnect failures" % (self.id, reconnect_attempts)
+                        "[ESP32 %s] Rebooting after %d reconnect failures" % (self._label, reconnect_attempts),
+                        priority=4,
+                        tags="warning",
                     )
                     time.sleep(2)
                     machine.reset()
@@ -772,13 +854,17 @@ class MQTTHandler(object):
                     if not wifi_ip:
                         print("WiFi reconnect failed, will retry...")
                         ntfy_alert(
-                            "[ESP32 %s] WiFi reconnect failed (attempt %d)" % (self.id, reconnect_attempts),
+                            "[ESP32 %s] WiFi reconnect failed (attempt %d)" % (self._label, reconnect_attempts),
+                            priority=4,
+                            tags="warning",
                         )
                         reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
                         continue
                     ntfy_alert(
-                        "[ESP32 %s] WiFi reconnected before MQTT" % self.id,
+                        "[ESP32 %s] WiFi reconnected before MQTT" % self._label,
                         topic="projectbilal-events",
+                        priority=2,
+                        tags="electric_plug",
                     )
 
                 # Attempt to reconnect MQTT
@@ -787,8 +873,10 @@ class MQTTHandler(object):
                     if success:
                         print("Reconnection successful!")
                         ntfy_alert(
-                            "[ESP32 %s] Reconnected after disconnect" % self.id,
+                            "[ESP32 %s] Reconnected after disconnect" % self._label,
                             topic="projectbilal-events",
+                            priority=2,
+                            tags="electric_plug",
                         )
                         self.send_status_update("online")
 
@@ -809,7 +897,9 @@ class MQTTHandler(object):
                         print("Reconnection failed")
                         ntfy_alert(
                             "[ESP32 %s] MQTT reconnect failed after %s attempts"
-                            % (self.id, reconnect_attempts),
+                            % (self._label, reconnect_attempts),
+                            priority=4,
+                            tags="warning",
                         )
                         reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
 
@@ -817,6 +907,8 @@ class MQTTHandler(object):
                     print("Reconnection attempt failed: %s" % reconnect_error)
                     ntfy_alert(
                         "[ESP32 %s] MQTT reconnect failed after %s attempts"
-                        % (self.id, reconnect_attempts),
+                        % (self._label, reconnect_attempts),
+                        priority=4,
+                        tags="warning",
                     )
                     reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)

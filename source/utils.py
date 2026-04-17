@@ -47,12 +47,17 @@ def led_off():
 _NTFY_BASE = "http://34.53.103.114"
 
 
-def ntfy_alert(message, topic="projectbilal-errors"):
+def ntfy_alert(message, topic="projectbilal-errors", priority=None, tags=None):
     try:
         import urequests
 
         url = "%s/%s" % (_NTFY_BASE, topic)
-        urequests.post(url, data=message, headers={"Title": "Bilal ESP32"})
+        headers = {"Title": "Bilal ESP32"}
+        if priority:
+            headers["Priority"] = str(priority)
+        if tags:
+            headers["Tags"] = tags
+        urequests.post(url, data=message, headers=headers)
     except Exception:
         pass
 
@@ -385,6 +390,15 @@ def clear_device_state():
             nvs_appwrite.erase_key("api_key")
             nvs_appwrite.commit()
             print("  - Cleared Appwrite API key")
+        except:
+            pass
+
+        # Clear device name
+        try:
+            nvs_device = esp32.NVS("device")
+            nvs_device.erase_key("name")
+            nvs_device.commit()
+            print("  - Cleared device name")
         except:
             pass
 
