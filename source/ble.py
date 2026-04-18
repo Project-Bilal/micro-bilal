@@ -96,29 +96,29 @@ async def control_task(connection, char):
                     # This prevents orphaned devices with bad credentials saved
                     time.sleep(0.5)  # Prevent ESP32 crashes
 
-                    print(
-                        f"BLE: Testing connection to '{SSID}' (credentials NOT saved yet)..."
-                    )
-                    # wifi_connect_with_creds() will handle radio setup
-                    # After a failed connection, it performs full radio reset with proper delays
+                    # Stop BLE before WiFi attempt — shared radio can't do both
+                    print("BLE: Stopping BLE to free radio for WiFi...")
+                    try:
+                        await connection.disconnect()
+                    except Exception:
+                        pass
+                    time.sleep(1)
+                    aioble.stop()
+                    time.sleep(1)
+                    print("BLE: Radio freed, attempting WiFi...")
+
                     ip = wifi_connect_with_creds(SSID, PASSWORD, SECURITY)
 
                     if ip:
-                        # Connection successful! NOW save credentials to NVS
+                        # Connection successful! Save credentials and reboot
                         print(f"BLE: Connection successful with IP: {ip}")
                         print(f"BLE: Saving credentials to NVS...")
                         set_wifi(SSID, SECURITY, PASSWORD)
 
-                        # Confirm success to app
-                        msg = b'{"HEADER":"network_written", "MESSAGE":"success"}'
-                        char.notify(connection, msg)
-                        time.sleep(2)
-
-                        # Restart device to begin normal operation
                         print(f"BLE: Credentials saved, rebooting...")
                         machine.reset()
                     else:
-                        # Connection failed - credentials never saved, no cleanup needed
+                        # Connection failed - reboot to restart BLE for retry
                         print(
                             f"BLE: Failed to connect to '{SSID}' - credentials NOT saved"
                         )
@@ -127,12 +127,8 @@ async def control_task(connection, char):
                             priority=3,
                             tags="warning",
                         )
-
-                        # Inform app of failure
-                        msg = b'{"HEADER":"network_written", "MESSAGE":"fail"}'
-                        char.notify(connection, msg)
-                        time.sleep(2)
-                        # Device stays in BLE mode for user to retry
+                        print("BLE: Rebooting to restart BLE for retry...")
+                        machine.reset()
 
     except Exception as e:
         print(f"BLE control_task error: {type(e).__name__}: {repr(e)}")

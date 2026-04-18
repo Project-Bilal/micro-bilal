@@ -203,18 +203,15 @@ def wifi_scan():
                 print(f"WiFi scan retry {attempt + 1}/3")
                 time.sleep(2)
 
-            # Simple approach: just ensure WiFi is active
-            # After failed connection, radio is OFF, this turns it back ON
-            # On first boot, radio is uninitialized, this initializes it
-            print("WiFi: Activating radio for scan...")
+            # Full radio reset before every scan — BLE shares the radio
+            # and a clean off/on cycle is needed for reliable results
+            print("WiFi: Resetting radio for scan...")
             if wlan.active():
-                # Radio already active, just disconnect any pending connections
                 wlan.disconnect()
-                time.sleep(0.5)
-            else:
-                # Radio off (from failed connection), turn it on
-                wlan.active(True)
-                time.sleep(2)  # Wait for initialization
+                wlan.active(False)
+                time.sleep(2)
+            wlan.active(True)
+            time.sleep(3)
 
             networks = wlan.scan()
             print(f"WiFi: Scan returned {len(networks)} raw networks")

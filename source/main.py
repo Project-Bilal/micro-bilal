@@ -44,7 +44,7 @@ def startup():
         print("connected: ", ip)
         return True
     print("no WiFi connection")
-    ntfy_alert("[ESP32] WiFi failed at boot", priority=4, tags="warning")
+    ntfy_alert("[ESP32 %s] WiFi failed at boot" % _get_device_label(), priority=4, tags="warning")
     return False
 
 
@@ -73,6 +73,6 @@ try:
     ota.rollback.cancel()
     main()
 except Exception as e:
-    ntfy_alert("[ESP32] Boot crash: %s" % e, priority=4, tags="warning")
+    ntfy_alert("[ESP32 %s] Boot crash: %s" % (_get_device_label(), e), priority=4, tags="warning")
     time.sleep(1)
     machine.reset()
