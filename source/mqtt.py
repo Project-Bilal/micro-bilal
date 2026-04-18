@@ -589,8 +589,23 @@ class MQTTHandler(object):
 
             gc.collect()
 
-            # Create single Chromecast connection
-            device = Chromecast(ip, port)
+            # Create Chromecast connection (retry once if speaker is asleep)
+            try:
+                device = Chromecast(ip, port)
+            except OSError as e:
+                if "ETIMEDOUT" in str(e):
+                    print("MQTT: Speaker may be asleep, retrying in 3s...")
+                    ntfy_alert(
+                        "[ESP32 %s] Speaker wake retry: %s" % (self._label, label),
+                        topic="projectbilal-events",
+                        priority=2,
+                        tags="speaker",
+                    )
+                    gc.collect()
+                    time.sleep(3)
+                    device = Chromecast(ip, port)
+                else:
+                    raise
 
             # Play URL with volume (volume is set after app launch, before media load)
             if vol is not None:
