@@ -12,6 +12,7 @@ import ota.rollback
 import utime as time
 import uasyncio as asyncio
 import mqtt
+from version import FIRMWARE_VERSION
 
 
 def _get_device_label():
@@ -60,7 +61,7 @@ def main():
         client = mqtt.MQTTHandler(device_id)
         conn = client.mqtt_connect()
         if conn:
-            ntfy_alert("[ESP32 %s] Online" % label, topic="projectbilal-events", priority=2, tags="electric_plug")
+            ntfy_alert("[ESP32 %s] Online (v%s)" % (label, FIRMWARE_VERSION), topic="projectbilal-events", priority=2, tags="electric_plug")
             client.mqtt_run()
         else:
             ntfy_alert("[ESP32 %s] MQTT connect failed" % label, priority=4, tags="warning")
