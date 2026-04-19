@@ -3,7 +3,6 @@ import uasyncio as asyncio  # MicroPython's async IO implementation
 import aioble  # Asynchronous BLE library
 import ujson as json  # MicroPython's JSON implementation
 from utils import (
-    wifi_scan,
     led_on,
     led_toggle,
     set_wifi,
@@ -36,7 +35,7 @@ _CHAR_UUID = bluetooth.UUID("97d91c3e-1122-48b8-8b6f-8ffb2daa2bda")
 _MAC_UUID = bluetooth.UUID("97d91c3f-1122-48b8-8b6f-8ffb2daa2bda")
 
 
-async def control_task(connection, char):
+async def control_task(connection, char, cached_networks=None):
     """
     Handles BLE communication and WiFi configuration requests.
     Processes incoming messages and sends appropriate responses.
@@ -44,6 +43,7 @@ async def control_task(connection, char):
     Args:
         connection: BLE connection object
         char: BLE characteristic for communication
+        cached_networks: Pre-scanned WiFi networks from boot (avoids BLE+WiFi radio conflict)
     """
     try:
         # Wait after BLE connection to allow WiFi radio to settle
@@ -62,9 +62,8 @@ async def control_task(connection, char):
 
                 # Handle WiFi scanning request
                 if header == "wifiList":
-                    print("BLE: Received wifiList request, starting scan...")
-                    ssid_list = wifi_scan()  # Scan for available networks
-                    print(f"BLE: Found {len(ssid_list)} networks")
+                    ssid_list = cached_networks or []
+                    print(f"BLE: Received wifiList request, serving {len(ssid_list)} cached networks")
                     # Send start notification
                     msg = b'{"HEADER":"wifiList", "MESSAGE":"start"}'
                     time.sleep(0.5)  # Prevent ESP32 crashes
@@ -109,21 +108,26 @@ async def control_task(connection, char):
 
                     ip = wifi_connect_with_creds(SSID, PASSWORD, SECURITY)
 
-                    if ip:
-                        # Connection successful! Save credentials and reboot
-                        print(f"BLE: Connection successful with IP: {ip}")
-                        print(f"BLE: Saving credentials to NVS...")
-                        set_wifi(SSID, SECURITY, PASSWORD)
+                    if not ip:
+                        # First attempt failed — radio may still be settling after BLE teardown
+                        print("BLE: WiFi attempt 1 failed, resetting radio and retrying...")
+                        wlan = network.WLAN(network.STA_IF)
+                        wlan.active(False)
+                        time.sleep(3)
+                        wlan.active(True)
+                        time.sleep(2)
+                        ip = wifi_connect_with_creds(SSID, PASSWORD, SECURITY)
 
-                        print(f"BLE: Credentials saved, rebooting...")
+                    if ip:
+                        print(f"BLE: Connection successful with IP: {ip}")
+                        set_wifi(SSID, SECURITY, PASSWORD)
                         machine.reset()
                     else:
-                        # Connection failed - reboot to restart BLE for retry
                         print(
-                            f"BLE: Failed to connect to '{SSID}' - credentials NOT saved"
+                            f"BLE: Failed to connect to '{SSID}' after 2 attempts - credentials NOT saved"
                         )
                         ntfy_alert(
-                            "[ESP32] WiFi onboarding failed for SSID: %s" % SSID,
+                            "[ESP32] WiFi onboarding failed for SSID: %s (2 attempts)" % SSID,
                             priority=3,
                             tags="warning",
                         )
@@ -138,10 +142,13 @@ async def control_task(connection, char):
     return
 
 
-async def run_ble():
+async def run_ble(cached_networks=None):
     """
     Main BLE service loop. Sets up the service, characteristics,
     and handles client connections.
+
+    Args:
+        cached_networks: Pre-scanned WiFi networks from boot
     """
     # Start factory reset button monitoring in background
     asyncio.create_task(monitor_reset_button())
@@ -174,7 +181,7 @@ async def run_ble():
         print("Connection from", connection.device)
 
         # Handle client communication
-        await control_task(connection, char)
+        await control_task(connection, char, cached_networks)
 
         # Wait for disconnection before restarting advertising
         await connection.disconnected()

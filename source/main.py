@@ -1,5 +1,6 @@
 from utils import (
     wifi_connect,
+    wifi_scan,
     led_toggle,
     get_mac,
     check_reset_button,
@@ -66,8 +67,18 @@ def main():
         else:
             ntfy_alert("[ESP32 %s] MQTT connect failed" % label, priority=4, tags="warning")
     else:
+        # Scan WiFi BEFORE starting BLE — the shared radio can't do both.
+        # Cache results so BLE can serve them instantly when phone asks.
+        print("Scanning WiFi networks before BLE starts...")
+        cached_networks = wifi_scan()
+        # Fully shut down WiFi radio before BLE takes over
+        import network
+        wlan = network.WLAN(network.STA_IF)
+        wlan.disconnect()
+        wlan.active(False)
+        time.sleep(3)
         print("Starting bluetooth advertising...")
-        asyncio.run(run_ble())
+        asyncio.run(run_ble(cached_networks))
 
 
 try:

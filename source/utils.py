@@ -7,11 +7,12 @@ from machine import Pin
 from micropython import const
 import esp32
 import uasyncio as asyncio
+import gc
 
 _BUFFER_SIZE = const(128)  # Make this big enough for your data
 _NVS_NAME = const("wifi_creds")  # NVS namespace
 
-_WIFI_TIMEOUT = const(30)  # WiFi connection timeout in seconds
+_WIFI_TIMEOUT = const(15)  # WiFi connection timeout per attempt (seconds)
 
 _LED_PIN = const(2)  # For the ESP32 built-in LED
 _BLINK_DELAY = const(0.25)  # Blink delay in seconds
@@ -167,8 +168,18 @@ def wifi_connect():
         # if values do not exist return None
         return None
 
-    # Use the new function to connect with saved credentials
-    return wifi_connect_with_creds(SSID, PASS, SECURITY)
+    # Try to connect, retry once with radio reset if first attempt fails
+    ip = wifi_connect_with_creds(SSID, PASS, SECURITY)
+    if not ip:
+        print("WiFi: First attempt failed, resetting radio and retrying...")
+        wlan = network.WLAN(network.STA_IF)
+        wlan.disconnect()
+        wlan.active(False)
+        time.sleep(3)
+        wlan.active(True)
+        time.sleep(3)
+        ip = wifi_connect_with_creds(SSID, PASS, SECURITY)
+    return ip
 
 
 # save wifi credentials to nvs
@@ -203,16 +214,16 @@ def wifi_scan():
                 print(f"WiFi scan retry {attempt + 1}/3")
                 time.sleep(2)
 
-            # Full radio reset before every scan — BLE shares the radio
-            # and a clean off/on cycle is needed for reliable results
-            print("WiFi: Resetting radio for scan...")
+            # Prepare radio for scan — avoid aggressive reset if radio is
+            # already active (e.g. BLE coexistence) to prevent Guru Meditation
             if wlan.active():
-                wlan.disconnect()
-                wlan.active(False)
-                time.sleep(2)
-            wlan.active(True)
-            time.sleep(3)
+                print("WiFi: Radio already active, scanning without reset...")
+            else:
+                print("WiFi: Activating radio for scan...")
+                wlan.active(True)
+                time.sleep(3)
 
+            gc.collect()
             networks = wlan.scan()
             print(f"WiFi: Scan returned {len(networks)} raw networks")
 
@@ -257,46 +268,6 @@ def wifi_scan():
 
     return []
 
-
-async def find_speaker_ip(speaker_name, timeout=10.0):
-    """
-    One-shot mDNS query to resolve a specific Chromecast speaker's current IP.
-    Returns {"ip": "...", "port": ...} or None if not found.
-    """
-    from mdns_client.service_discovery.txt_discovery import TXTServiceDiscovery
-    from mdns_client.client import Client
-    import gc
-
-    wlan = network.WLAN(network.STA_IF)
-    ip = wlan.ifconfig()[0]
-    client = Client(ip)
-    discovery = TXTServiceDiscovery(client)
-
-    try:
-        results = await discovery.query_once("_googlecast", "_tcp", timeout=timeout)
-
-        for device in results:
-            try:
-                fn = device.txt_records.get("fn", [""])[0]
-                if fn == speaker_name:
-                    device_ip = device.ips.pop() if device.ips else None
-                    if device_ip:
-                        print(f"mDNS: Found '{speaker_name}' at {device_ip}:{device.port}")
-                        return {"ip": device_ip, "port": device.port}
-            except Exception as e:
-                print(f"mDNS: Skipping malformed device: {e}")
-
-        print(f"mDNS: Speaker '{speaker_name}' not found")
-        return None
-
-    finally:
-        for obj in (discovery, client):
-            for method in ("close", "deinit"):
-                try:
-                    getattr(obj, method, lambda: None)()
-                except Exception:
-                    pass
-        gc.collect()
 
 
 def clear_device_state():
