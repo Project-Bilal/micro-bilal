@@ -84,7 +84,6 @@ def wifi_connect_with_creds(SSID, PASSWORD, SECURITY):
     Returns:
         IP address string if connected, None if failed
     """
-    network.hostname("Bilal Cast")
     wlan = network.WLAN(network.STA_IF)
 
     # Prepare radio for connection attempt

@@ -642,7 +642,14 @@ class MQTTHandler(object):
                 try:
                     self.mqtt.check_msg()
                 except OSError as e:
-                    # All OSErrors from check_msg indicate connection issues
+                    err = e.errno if hasattr(e, 'errno') else 0
+                    if err == 9 or err == 113:  # EBADF or ECONNABORTED
+                        print(f"Socket corruption detected (errno {err}), forcing WiFi reset...")
+                        import network
+                        wlan = network.WLAN(network.STA_IF)
+                        wlan.disconnect()
+                        wlan.active(False)
+                        time.sleep(3)
                     print(f"Network error during check_msg: {e}")
                     raise Exception(f"Network error: {e}")
                 except Exception as e:
@@ -724,7 +731,7 @@ class MQTTHandler(object):
 
                 # Reboot safety valve — with mDNS disabled, 5 failures means
                 # something is seriously wrong
-                if reconnect_attempts >= 5:
+                if reconnect_attempts >= 3:
                     print("Too many reconnect failures, rebooting...")
                     ntfy_alert(
                         "[ESP32 %s] Rebooting after %d reconnect failures" % (self._label, reconnect_attempts),

@@ -7,8 +7,6 @@ from utils import (
     led_toggle,
     set_wifi,
     get_mac,
-    wifi_connect,
-    wifi_connect_with_creds,
     monitor_reset_button,
     ntfy_alert,
 )  # Custom utility functions
@@ -16,7 +14,6 @@ import machine  # Hardware control
 import bluetooth  # BLE functionality
 from micropython import const  # Constant definition
 import utime as time  # Time functions
-import network  # WiFi network management
 
 # Constants for BLE configuration
 # Long advertisement interval to conserve power
@@ -91,48 +88,25 @@ async def control_task(connection, char, cached_networks=None):
                     print(f"BLE: Received WiFi credentials for SSID: '{SSID}'")
                     print(f"BLE: Security type: {SECURITY}")
 
-                    # TWO-PHASE COMMIT: Test connection BEFORE saving to NVS
-                    # This prevents orphaned devices with bad credentials saved
-                    time.sleep(0.5)  # Prevent ESP32 crashes
+                    # Let the BLE write-with-response ACK reach the app
+                    # before we do anything else
+                    time.sleep(1)
 
-                    # Stop BLE before WiFi attempt — shared radio can't do both
-                    print("BLE: Stopping BLE to free radio for WiFi...")
+                    # Save credentials and reboot — let the normal boot path
+                    # handle WiFi connection. Avoids BLE→WiFi radio transition
+                    # which causes Guru Meditation crashes on the shared radio.
+                    print("BLE: Saving credentials and rebooting...")
+                    set_wifi(SSID, SECURITY, PASSWORD)
+
+                    # Notify app that credentials are saved and device is rebooting
                     try:
-                        await connection.disconnect()
+                        msg = json.dumps({"HEADER": "network_written", "MESSAGE": "success"}).encode("utf-8")
+                        char.notify(connection, msg)
+                        time.sleep(1)
                     except Exception:
                         pass
-                    time.sleep(1)
-                    aioble.stop()
-                    time.sleep(1)
-                    print("BLE: Radio freed, attempting WiFi...")
 
-                    ip = wifi_connect_with_creds(SSID, PASSWORD, SECURITY)
-
-                    if not ip:
-                        # First attempt failed — radio may still be settling after BLE teardown
-                        print("BLE: WiFi attempt 1 failed, resetting radio and retrying...")
-                        wlan = network.WLAN(network.STA_IF)
-                        wlan.active(False)
-                        time.sleep(3)
-                        wlan.active(True)
-                        time.sleep(2)
-                        ip = wifi_connect_with_creds(SSID, PASSWORD, SECURITY)
-
-                    if ip:
-                        print(f"BLE: Connection successful with IP: {ip}")
-                        set_wifi(SSID, SECURITY, PASSWORD)
-                        machine.reset()
-                    else:
-                        print(
-                            f"BLE: Failed to connect to '{SSID}' after 2 attempts - credentials NOT saved"
-                        )
-                        ntfy_alert(
-                            "[ESP32] WiFi onboarding failed for SSID: %s (2 attempts)" % SSID,
-                            priority=3,
-                            tags="warning",
-                        )
-                        print("BLE: Rebooting to restart BLE for retry...")
-                        machine.reset()
+                    machine.reset()
 
     except Exception as e:
         print(f"BLE control_task error: {type(e).__name__}: {repr(e)}")
