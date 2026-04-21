@@ -383,27 +383,6 @@ class MQTTHandler(object):
             self.mqtt.publish(topic, json.dumps(response))
             print("Discovery delegated to mobile app")
 
-        if action == "set_appwrite_key":
-            key = props.get("key")
-            if not key:
-                print("MQTT: set_appwrite_key missing key")
-                return
-            try:
-                import esp32
-                nvs = esp32.NVS("appwrite")
-                nvs.set_blob("api_key", key)
-                nvs.commit()
-                print("MQTT: Appwrite API key saved to NVS")
-                ntfy_alert(
-                    "[ESP32 %s] Appwrite API key provisioned" % self._label,
-                    topic="projectbilal-events",
-                    priority=2,
-                    tags="key",
-                )
-            except Exception as e:
-                print(f"MQTT: Failed to save Appwrite key to NVS: {e}")
-                ntfy_alert("[ESP32 %s] Failed to save Appwrite key: %s" % (self._label, e), priority=4, tags="warning")
-
         if action == "set_device_name":
             name = props.get("name")
             if not name:
@@ -436,15 +415,6 @@ class MQTTHandler(object):
                 nvs.erase_key("SECURITY")
                 nvs.commit()
                 print("WiFi credentials deleted from NVS")
-
-                # Clear Appwrite API key
-                try:
-                    nvs_appwrite = esp32.NVS("appwrite")
-                    nvs_appwrite.erase_key("api_key")
-                    nvs_appwrite.commit()
-                    print("Appwrite API key deleted from NVS")
-                except Exception:
-                    pass
 
                 # Clear device name
                 try:

@@ -299,15 +299,6 @@ def clear_device_state():
 
         nvs.commit()
 
-        # Clear Appwrite API key
-        try:
-            nvs_appwrite = esp32.NVS("appwrite")
-            nvs_appwrite.erase_key("api_key")
-            nvs_appwrite.commit()
-            print("  - Cleared Appwrite API key")
-        except:
-            pass
-
         # Clear device name
         try:
             nvs_device = esp32.NVS("device")
