@@ -1,180 +1,98 @@
 ================================================================================
-                    Production Device Setup Guide
-                    This is only used for the .zip file for my dad so i can delete it later
+                    Bilal Cast - Device Flashing Guide
 ================================================================================
 
-This guide explains how to flash multiple ESP32 devices for production 
-deployment.
-
---------------------------------------------------------------------------------
-PREREQUISITES
---------------------------------------------------------------------------------
-
-1. Install Required Tools
--------------------------
-
-On macOS:
-    pip install esptool adafruit-ampy
-
-On Linux:
-    pip3 install esptool adafruit-ampy
-
-On Windows:
-    pip install esptool adafruit-ampy
-
-
-2. Verify Installation
-----------------------
-
-Run these commands:
-    esptool.py version
-    ampy --help
-
-Both commands should work without errors.
+Flash ESP32 devices with firmware and application files.
+One script does everything — installs tools on first run, then flashes.
 
 
 --------------------------------------------------------------------------------
-FLASHING DEVICES
+FLASHING A DEVICE
 --------------------------------------------------------------------------------
 
-Step 1: Prepare
----------------
+1. Plug in the ESP32 via USB
 
-1. Extract the flash_kit.zip file to a location of your choice
-2. Open Terminal (macOS/Linux) or Command Prompt (Windows)
-3. Navigate to the directory where you extracted the flash_kit:
-   
-   cd /path/to/extracted/flash_kit
+2. Run:
 
+    ./flash_device.sh
 
-Step 2: Run the Script
-----------------------
+3. Wait ~45 seconds for it to complete
 
-    ./flash_production.sh
+4. Unplug the device, plug in the next one, and run again
 
 
-Step 3: Follow the Prompts
----------------------------
+That's it. The script will:
 
-The script will:
-
-  [OK] Check that all required tools and files are present
-  [OK] Prompt you when ready to flash each device
-  [OK] Automatically detect the USB port
-  [OK] Erase the flash memory
-  [OK] Flash the firmware
-  [OK] Upload all application files
-  [OK] Show success/error status for each device
+  - Install esptool and ampy if not already installed (first run only)
+  - Add your user to the dialout group if needed (first run only, requires re-login)
+  - Auto-detect the USB port
+  - Erase the flash
+  - Flash the firmware
+  - Upload all application files
 
 
-Step 4: Process Multiple Devices
----------------------------------
+--------------------------------------------------------------------------------
+FIRST TIME SETUP
+--------------------------------------------------------------------------------
 
-For each device:
+On the very first run, the script may:
 
-1. Connect ESP32 via USB
-2. Press 'y' when prompted
-3. Wait for flashing to complete (takes ~30-60 seconds)
-4. Disconnect the device
-5. Connect next device
-6. Repeat
+1. Install Python packages (esptool, ampy) — takes ~30 seconds
+2. Add you to the 'dialout' group — you'll need to log out and log
+   back in, then run the script again
 
-Press 'q' to quit when all devices are flashed.
+After that, every run goes straight to flashing.
+
+
+--------------------------------------------------------------------------------
+MANUAL PORT SELECTION
+--------------------------------------------------------------------------------
+
+If auto-detection doesn't work, specify the port:
+
+    ./flash_device.sh /dev/ttyUSB0
+
+
+To find your port:
+
+    ls /dev/ttyUSB* /dev/ttyACM*
 
 
 --------------------------------------------------------------------------------
 TROUBLESHOOTING
 --------------------------------------------------------------------------------
 
-"No USB device detected"
-------------------------
-
-- Make sure the ESP32 is connected via USB
-- Try a different USB cable (some cables are power-only)
-- On Linux, you may need to add your user to the 'dialout' group:
-  
-    sudo usermod -a -G dialout $USER
-  
-  Then log out and log back in.
-
+"No ESP32 detected"
+  - Make sure the device is plugged in via USB
+  - Try a different USB cable (some are power-only)
+  - Check: ls /dev/ttyUSB* /dev/ttyACM*
 
 "Permission denied" on port
----------------------------
-
-macOS/Linux:
-    sudo chmod 666 /dev/cu.usbserial-*
-
-Linux:
-    sudo chmod 666 /dev/ttyUSB*
-
+  - Make sure you logged out and back in after the first run
+  - Or run: sudo chmod 666 /dev/ttyUSB*
 
 "Failed to upload files"
-------------------------
-
-- Wait 10 seconds and try the device again
-- The device may need more time to boot after firmware flash
-- Try disconnecting and reconnecting the USB cable
-
+  - Unplug and replug the device
+  - Wait 10 seconds and try again
+  - The device may need more boot time after firmware flash
 
 Script won't run
-----------------
-
-Make sure it's executable:
-
-    chmod +x flash_production.sh
-
-
---------------------------------------------------------------------------------
-DEVICE COUNT TRACKING
---------------------------------------------------------------------------------
-
-The script automatically numbers each device. Keep track of:
-
-- How many devices you've flashed
-- Any devices that failed (note the device number)
-- Which devices need to be retried
+  - Run: chmod +x flash_device.sh
 
 
 --------------------------------------------------------------------------------
 AFTER FLASHING
 --------------------------------------------------------------------------------
 
-Each device will be ready with:
+Each device will have:
 
-  [OK] Firmware version 1.7
-  [OK] All application files
-  [OK] Ready for WiFi configuration via BLE
+  - Latest firmware and application files
+  - Ready for WiFi configuration via the Bilal Cast mobile app
 
-The devices will need to be configured with WiFi credentials before they can 
-connect to the network.
-
-
---------------------------------------------------------------------------------
-TIPS
---------------------------------------------------------------------------------
-
-- Batch size: Flash 5-10 devices at a time, then take a break
-- USB hub: A powered USB hub can speed up the process
-- Labels: Label each device after successful flashing
-- Testing: Test 1-2 devices completely before flashing all 10
-
-
---------------------------------------------------------------------------------
-QUICK REFERENCE
---------------------------------------------------------------------------------
-
-Step                 Command      Time
----------------------------------------------
-Erase flash          Automatic    ~10s
-Flash firmware       Automatic    ~20s
-Upload app files     Automatic    ~15s
----------------------------------------------
-Total per device                   ~45s
+To set up a device:
+  1. Open the Bilal Cast app
+  2. Tap "Add Device"
+  3. Follow the on-screen instructions to connect via Bluetooth
 
 
 ================================================================================
-
-Questions? Contact the developer.
-
-
-

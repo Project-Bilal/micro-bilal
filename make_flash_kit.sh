@@ -6,10 +6,9 @@ ZIP_NAME="flash_kit.zip"
 
 REQUIRED_PATHS=(
   "firmware"
-  "flash_production.sh"
+  "flash_device.sh"
   "source"
   "PRODUCTION_SETUP.txt"
-  "README.md"
 )
 
 for path in "${REQUIRED_PATHS[@]}"; do
@@ -23,10 +22,9 @@ rm -f "$ZIP_NAME"
 
 zip -r "$ZIP_NAME" \
   firmware \
-  flash_production.sh \
+  flash_device.sh \
   source \
   PRODUCTION_SETUP.txt \
-  README.md \
   -x "source/.DS_Store" "source/.workflow-trigger"
 
 echo "Created $ZIP_NAME successfully."
