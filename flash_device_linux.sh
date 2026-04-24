@@ -1,14 +1,14 @@
 #!/bin/bash
 
 ################################################################################
-# Flash Device Script (macOS)
+# Flash Device Script
 #
 # Non-interactive script to flash firmware and upload app files to an ESP32.
-# Tailored for Rafik's MacBook (Python 3.9 user install in ~/Library/Python).
+# Automatically installs prerequisites on first run.
 #
 # Usage:
-#   ./flash_device.sh                   # Auto-detect USB port
-#   ./flash_device.sh /dev/cu.usbserial # Use specific port
+#   ./flash_device.sh              # Auto-detect USB port
+#   ./flash_device.sh /dev/ttyUSB0 # Use specific port
 ################################################################################
 
 set -euo pipefail
@@ -17,13 +17,6 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 FIRMWARE_PATH="$SCRIPT_DIR/firmware/firmware.bin"
 SOURCE_DIR="$SCRIPT_DIR/source"
 AMPY_DELAY="1.5"
-
-# Make pip --user installs discoverable regardless of which Python minor
-# version is active. Prepend every ~/Library/Python/*/bin we find.
-for py_bin in "$HOME"/Library/Python/*/bin; do
-    [ -d "$py_bin" ] && PATH="$py_bin:$PATH"
-done
-export PATH
 
 # Colors
 GREEN='\033[0;32m'
@@ -41,24 +34,34 @@ warn()    { echo -e "${YELLOW}[WARN]${NC} $1"; }
 # Phase 1: Environment check
 ########################################
 
+needs_logout=false
+
+# Install esptool if missing
 if ! command -v esptool.py &> /dev/null; then
     info "Installing esptool..."
-    pip3 install --user esptool
+    pip3 install esptool
     success "esptool installed"
 fi
 
+# Install ampy if missing
 if ! command -v ampy &> /dev/null; then
     info "Installing adafruit-ampy..."
-    pip3 install --user adafruit-ampy
+    pip3 install adafruit-ampy
     success "ampy installed"
 fi
 
-if ! command -v esptool.py &> /dev/null || ! command -v ampy &> /dev/null; then
-    error "esptool.py or ampy still not on PATH after install."
-    error "Check that ~/Library/Python/*/bin exists and is readable."
-    exit 1
+# Check dialout group (Linux only)
+if [[ "$OSTYPE" != "darwin"* ]]; then
+    if ! groups "$USER" | grep -qw dialout; then
+        info "Adding $USER to dialout group for serial port access..."
+        sudo usermod -a -G dialout "$USER"
+        warn "You were added to the 'dialout' group."
+        warn "Please log out and log back in, then run this script again."
+        exit 0
+    fi
 fi
 
+# Check firmware and source exist
 if [ ! -f "$FIRMWARE_PATH" ]; then
     error "Firmware not found: $FIRMWARE_PATH"
     exit 1
@@ -74,7 +77,12 @@ fi
 ########################################
 
 detect_port() {
-    local patterns=(/dev/cu.usbserial* /dev/cu.wchusbserial* /dev/cu.usbmodem* /dev/cu.SLAB_USBtoUART*)
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        local patterns=(/dev/cu.usbserial* /dev/cu.wchusbserial* /dev/cu.usbmodem* /dev/cu.SLAB_USBtoUART*)
+    else
+        local patterns=(/dev/ttyUSB* /dev/ttyACM* /dev/ttyAMA*)
+    fi
+
     for pattern in "${patterns[@]}"; do
         for port in $pattern; do
             if [ -e "$port" ] && [ ! -d "$port" ]; then
@@ -95,7 +103,7 @@ if [ $# -ge 1 ]; then
 else
     PORT=$(detect_port) || {
         error "No ESP32 detected. Make sure the device is plugged in via USB."
-        error "You can also specify the port manually: ./flash_device.sh /dev/cu.usbserial-XXXX"
+        error "You can also specify the port manually: ./flash_device.sh /dev/ttyUSB0"
         exit 1
     }
 fi
