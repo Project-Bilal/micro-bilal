@@ -75,7 +75,7 @@ class MQTTHandler(object):
         # Configure Last Will and Testament before connecting
         try:
             self.mqtt.set_last_will(
-                self.lwt_topic, self.lwt_message, retain=False, qos=1
+                self.lwt_topic, self.lwt_message, retain=True, qos=1
             )
         except Exception as e:
             print("Warning: set_last_will failed:", e)
@@ -100,7 +100,8 @@ class MQTTHandler(object):
                 "timestamp": time.time(),
                 "firmware_version": FIRMWARE_VERSION,
             }
-            self.mqtt.publish(self.lwt_topic, json.dumps(message))
+            # Retained so the app sees the device's last known state on subscribe.
+            self.mqtt.publish(self.lwt_topic, json.dumps(message), retain=True)
             print(f"Status update sent: {status} (firmware: {FIRMWARE_VERSION})")
         except Exception as e:
             print(f"Failed to send status update: {e}")
