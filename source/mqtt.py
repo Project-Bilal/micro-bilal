@@ -13,6 +13,14 @@ _PING_INTERVAL = const(15)  # this needs to be less than keepalive
 _KEEPALIVE = const(45)  # Relaxed now that mDNS is disabled — less overhead
 _MQTT_HOST = const("34.53.103.114")
 _MQTT_PORT = const(1883)
+# MicroPython's epoch is 2000-01-01; add this to reach the Unix (1970) epoch.
+_UNIX_OFFSET = const(946684800)
+
+
+def _unix_now():
+    """Current time as Unix epoch seconds. NTP is synced at boot
+    (see main._sync_time); until then this is boot-relative + offset."""
+    return time.time() + _UNIX_OFFSET
 
 
 class MQTTHandler(object):
@@ -22,6 +30,7 @@ class MQTTHandler(object):
         self.device_name = self._load_device_name()
         self.connected = False
         self.reboot_requested = False
+        self.wdt = None  # set in mqtt_run(); fed from play() to avoid resets
         self.discovery_in_progress = False
         self._play_in_progress = False
         self._last_play_url = None
@@ -34,13 +43,9 @@ class MQTTHandler(object):
         self._pending_playback_result = None
         self._post_cast_reconnect = False
         self.lwt_topic = f"projectbilal/{self.id}/status"
-        self.lwt_message = json.dumps(
-            {
-                "status": "offline",
-                "timestamp": time.time(),
-                "firmware_version": FIRMWARE_VERSION,
-            }
-        )
+        # LWT payload is (re)built at connect time in mqtt_connect() so its
+        # timestamp reflects the actual connection (after NTP sync), not boot.
+        self.lwt_message = None
 
     def _load_device_name(self):
         """Load device name from NVS, fallback to MAC address."""
@@ -64,6 +69,13 @@ class MQTTHandler(object):
             return '"%s"' % self.device_name
         return self.id
 
+    def _feed_wdt(self):
+        """Feed the watchdog if it's running. Callable from the blocking
+        play()/discovery paths, which otherwise starve the WDT (fed only in
+        the mqtt_run loop) and cause a reset mid-playback."""
+        if self.wdt:
+            self.wdt.feed()
+
     def mqtt_connect(self):
         self.mqtt = MQTTClient(
             client_id=self.id,
@@ -72,7 +84,9 @@ class MQTTHandler(object):
             keepalive=_KEEPALIVE,
         )
 
-        # Configure Last Will and Testament before connecting
+        # Build the LWT fresh so its timestamp reflects this connection (after
+        # NTP sync), then register it before connecting.
+        self.lwt_message = self._status_json("offline")
         try:
             self.mqtt.set_last_will(
                 self.lwt_topic, self.lwt_message, retain=True, qos=1
@@ -92,16 +106,19 @@ class MQTTHandler(object):
 
         return True
 
+    def _status_json(self, status):
+        """Build a status payload with a real Unix-epoch timestamp."""
+        return json.dumps({
+            "status": status,
+            "timestamp": _unix_now(),
+            "firmware_version": FIRMWARE_VERSION,
+        })
+
     def send_status_update(self, status):
         """Send status update to the status topic with firmware info"""
         try:
-            message = {
-                "status": status,
-                "timestamp": time.time(),
-                "firmware_version": FIRMWARE_VERSION,
-            }
             # Retained so the app sees the device's last known state on subscribe.
-            self.mqtt.publish(self.lwt_topic, json.dumps(message), retain=True)
+            self.mqtt.publish(self.lwt_topic, self._status_json(status), retain=True)
             print(f"Status update sent: {status} (firmware: {FIRMWARE_VERSION})")
         except Exception as e:
             print(f"Failed to send status update: {e}")
@@ -165,6 +182,7 @@ class MQTTHandler(object):
                 while self.discovery_in_progress and wait_count < max_wait:
                     time.sleep(1)
                     wait_count += 1
+                    self._feed_wdt()
                 if self.discovery_in_progress:
                     print("Discovery still in progress, proceeding anyway")
 
@@ -193,15 +211,12 @@ class MQTTHandler(object):
             if url:
                 print(f"Starting OTA update from: {url}")
 
-                # Disconnect from MQTT to free up network resources
+                # Publish a retained "offline" before disconnecting. A graceful
+                # MQTT disconnect suppresses the LWT, so without this the retained
+                # status would stay "online" through the whole flash + reboot
+                # (and forever if the OTA bricks the device).
                 print("Disconnecting from MQTT for OTA update...")
-                try:
-                    if self.connected and self.mqtt:
-                        self.mqtt.disconnect()
-                        self.connected = False
-                        print("MQTT disconnected successfully")
-                except Exception as e:
-                    print(f"Error disconnecting MQTT: {e}")
+                self.mqtt_disconnect()
 
                 # Small delay to ensure disconnection is complete
                 time.sleep(1)
@@ -249,14 +264,11 @@ class MQTTHandler(object):
             print(f"Starting app update for files: {files}")
             print(f"Base URL: {base_url}")
 
-            # Disconnect MQTT to free up resources
-            try:
-                if self.connected and self.mqtt:
-                    self.mqtt.disconnect()
-                    self.connected = False
-                    print("MQTT disconnected for app update")
-            except Exception as e:
-                print(f"Error disconnecting MQTT: {e}")
+            # Publish a retained "offline" before disconnecting. A graceful
+            # disconnect suppresses the LWT, so without this the retained status
+            # would stay "online" through the download + reboot window.
+            print("Disconnecting from MQTT for app update...")
+            self.mqtt_disconnect()
 
             # Import dependencies
             import urequests
@@ -438,6 +450,17 @@ class MQTTHandler(object):
 
                 # Wait a moment for message to be sent, then reboot
                 time.sleep(3)
+
+                # Clear the retained status so a deleted device leaves no ghost
+                # on the broker, and disconnect gracefully so the LWT does NOT
+                # re-publish a retained "offline" on reset (ungraceful drop).
+                try:
+                    self.mqtt.publish(self.lwt_topic, "", retain=True)
+                    self.mqtt.disconnect()
+                    self.connected = False
+                except Exception as e:
+                    print("Cleanup before delete-reset failed:", e)
+
                 print("Rebooting ESP32...")
                 import machine
 
@@ -487,6 +510,7 @@ class MQTTHandler(object):
                     )
                     gc.collect()
                     time.sleep(3)
+                    self._feed_wdt()
                     device = Chromecast(ip, port)
                 else:
                     raise
@@ -504,6 +528,7 @@ class MQTTHandler(object):
             if playback_confirmed:
                 self._play_confirmed_count += 1
                 time.sleep(2)
+                self._feed_wdt()
                 print("MQTT: Audio playback confirmed, starting...")
                 ntfy_alert(
                     "[ESP32 %s] Playback confirmed: %s" % (self._label, label),
@@ -516,6 +541,7 @@ class MQTTHandler(object):
                     "MQTT: Playback not confirmed, waiting longer for Chromecast to start..."
                 )
                 time.sleep(5)
+                self._feed_wdt()
                 ntfy_alert(
                     "[ESP32 %s] Playback NOT confirmed: %s" % (self._label, label),
                     topic="projectbilal-events",
@@ -550,7 +576,9 @@ class MQTTHandler(object):
             if not wlan.isconnected():
                 print("MQTT: WiFi dropped after cast, resetting radio...")
                 from utils import wifi_connect
+                self._feed_wdt()  # wifi_connect can block ~30s
                 wifi_ip = wifi_connect()
+                self._feed_wdt()
                 if wifi_ip:
                     print(f"MQTT: WiFi recovered with IP: {wifi_ip}")
                     # Flag for fast reconnect in mqtt_run loop
@@ -564,7 +592,7 @@ class MQTTHandler(object):
                 "type": "playback_result",
                 "confirmed": playback_confirmed,
                 "label": label,
-                "timestamp": time.time(),
+                "timestamp": _unix_now(),
             })
             try:
                 if self.connected and self.mqtt:
@@ -588,6 +616,10 @@ class MQTTHandler(object):
         # Enable hardware watchdog (120s timeout)
         from machine import WDT, Pin
         wdt = WDT(timeout=120000)
+        self.wdt = wdt  # expose so play()/discovery can feed it too
+
+        # Factory-reset button (GPIO0) — construct once, polled each tick below.
+        button = Pin(0, Pin.IN, Pin.PULL_UP)
 
         while True:
             try:
@@ -601,7 +633,6 @@ class MQTTHandler(object):
                     machine.reset()
 
                 # Check for factory reset button (non-blocking check every second)
-                button = Pin(0, Pin.IN, Pin.PULL_UP)
                 if button.value() == 0:  # Button pressed
                     if check_reset_button():
                         print("Factory reset confirmed during MQTT operation!")
@@ -700,7 +731,7 @@ class MQTTHandler(object):
                 reconnect_attempts += 1
                 print(f"Attempting to reconnect (attempt {reconnect_attempts})")
 
-                # Reboot safety valve — with mDNS disabled, 5 failures means
+                # Reboot safety valve — with mDNS disabled, 3 failures means
                 # something is seriously wrong
                 if reconnect_attempts >= 3:
                     print("Too many reconnect failures, rebooting...")
@@ -772,7 +803,8 @@ class MQTTHandler(object):
                             priority=2,
                             tags="electric_plug",
                         )
-                        self.send_status_update("online")
+                        # Note: mqtt_connect() already published the "online"
+                        # status, so no second send_status_update here.
 
                         # Flush any pending playback result from before disconnect
                         if self._pending_playback_result:

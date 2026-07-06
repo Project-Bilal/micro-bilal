@@ -31,6 +31,18 @@ def _get_device_label():
     return get_mac()
 
 
+def _sync_time():
+    """Best-effort NTP sync so device timestamps are real Unix time.
+    Non-fatal: on failure, timestamps fall back to boot-relative. ntptime
+    uses a short internal socket timeout, so a blocked NTP port won't hang."""
+    try:
+        import ntptime
+        ntptime.settime()
+        print("NTP: time synced")
+    except Exception as e:
+        print("NTP: sync failed (non-fatal):", e)
+
+
 def startup():
     # Check for factory reset button on boot
     print("Checking for factory reset button...")
@@ -44,6 +56,7 @@ def startup():
     ip = wifi_connect()
     if ip:
         print("connected: ", ip)
+        _sync_time()
         return True
     print("no WiFi connection")
     ntfy_alert("[ESP32 %s] WiFi failed at boot" % _get_device_label(), priority=4, tags="warning")
