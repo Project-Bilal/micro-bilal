@@ -164,8 +164,12 @@ clear.)
 4. ~~**B2** — watchdog feeding in `play()`.~~ ✅ done (`mqtt.py`)
 5. ~~**C1–C4** — cleanups, batched.~~ ✅ done (`mqtt.py`)
 
-> **All code items landed.** Remaining: bump `FIRMWARE_VERSION` (→ 1.8), then
-> flash/upgrade the plugged-in device. ← **final step, needs your go-ahead**
+> **DONE.** Bumped to 1.8, committed (`1948900`), pushed to `main` →
+> `deploy.yml` staged 1.8 on the OTA server. OTA'd the **Kirkland** device
+> (`1c-69-20-ea-c6-8c`, was 1.7) via `update_app`; verified live: reports 1.8 /
+> online with a real Unix timestamp (NTP working). The originally-plugged-in
+> device took 1.8 over USB but couldn't be network-verified (its saved WiFi
+> `tarragona` is out of range).
 
 ## Notes / decisions log
 - **2026-07-05 — A1 closed, no code change.** Pulled `bridge.py` off the VM and
@@ -190,3 +194,8 @@ clear.)
   duplicate online publish; clear retained + graceful disconnect on delete;
   hoisted `Pin(0)` out of the loop. All behavior-preserving except C3 (adds
   retained-clear) and C2 (one fewer publish).
+- **2026-07-05 — shipped & verified.** Committed `1948900`, pushed `main`,
+  `deploy.yml` staged 1.8 on the OTA server (curl-verified). OTA'd Kirkland via
+  `update_app` (files: main/mqtt/version). Live check of its retained status:
+  `{"firmware_version":"1.8","timestamp":1783320329,"status":"online"}` — real
+  Unix timestamp confirms NTP+offset (B1) working end-to-end.
