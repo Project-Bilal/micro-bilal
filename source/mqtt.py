@@ -13,6 +13,10 @@ _PING_INTERVAL = const(15)  # this needs to be less than keepalive
 _KEEPALIVE = const(45)  # Relaxed now that mDNS is disabled — less overhead
 _MQTT_HOST = const("34.53.103.114")
 _MQTT_PORT = const(1883)
+# Consecutive out-of-memory cast failures before the device reboots itself.
+# Dispatches arrive in pairs (reminder ~15 min before the prayer), so 2 means
+# recovery inside ~15 minutes, losing at most two sounds.
+_MEM_FAILURE_REBOOT_THRESHOLD = const(2)
 # MicroPython's epoch is 2000-01-01; add this to reach the Unix (1970) epoch.
 _UNIX_OFFSET = const(946684800)
 
@@ -39,6 +43,8 @@ class MQTTHandler(object):
         self._play_count = 0
         self._play_confirmed_count = 0
         self._error_count = 0
+        self._errors_total = 0  # cumulative; _error_count is zeroed each report
+        self._consecutive_mem_failures = 0
         self._start_time = time.time()
         self._pending_playback_result = None
         self._post_cast_reconnect = False
@@ -75,6 +81,48 @@ class MQTTHandler(object):
         the mqtt_run loop) and cause a reset mid-playback."""
         if self.wdt:
             self.wdt.feed()
+
+    @staticmethod
+    def _is_memory_error(e):
+        """True if an exception means WE ran out of memory, as opposed to the
+        cast target being unreachable.
+
+        mbedTLS allocates from the ESP-IDF internal DRAM heap, which is a
+        separate pool from the MicroPython GC heap that gc.mem_free() reports —
+        so a device can show ~78 KB free and still fail every TLS handshake.
+        Once that pool is exhausted the failure is permanent until reboot.
+
+        Only these errors justify the reboot valve. Connectivity failures
+        (ETIMEDOUT/EHOSTUNREACH — speaker off or unplugged) must NOT count, or
+        a user with an unplugged Chromecast gets a device that reboots itself
+        several times a day forever."""
+        if isinstance(e, MemoryError):
+            return True
+        s = str(e)
+        # "ALLOC_FAILED" covers MBEDTLS_ERR_MPI_ALLOC_FAILED (observed in the
+        # field) and MBEDTLS_ERR_SSL_ALLOC_FAILED.
+        return "ALLOC_FAILED" in s or "ENOMEM" in s or "memory allocation failed" in s
+
+    @staticmethod
+    def _dram_stats():
+        """Free ESP-IDF internal DRAM as (free, largest_free_block, min_free).
+
+        largest_free_block is the metric that predicts cast failure: mbedTLS
+        needs a CONTIGUOUS allocation, so fragmentation shows up here as the
+        largest block shrinking while total free still looks healthy.
+        Best-effort — returns Nones on builds without idf_heap_info."""
+        try:
+            import esp32
+
+            # Each region is (total, free, largest_free, min_free).
+            regions = esp32.idf_heap_info(esp32.HEAP_DATA)
+            return (
+                sum(r[1] for r in regions),
+                max(r[2] for r in regions),
+                min(r[3] for r in regions),
+            )
+        except Exception:
+            return None, None, None
 
     def mqtt_connect(self):
         self.mqtt = MQTTClient(
@@ -386,6 +434,28 @@ class MQTTHandler(object):
                 wifi_connect()
                 self.mqtt_connect()
 
+        if action == "reboot":
+            """
+            Reboot the device.
+
+            {"action": "reboot"}
+
+            Exists so recovering a wedged device doesn't require the update_app
+            path, which rewrites files on what may already be a memory-starved
+            device. Reset happens in mqtt_run, not here, so the callback can
+            return cleanly first.
+            """
+            print("Reboot requested via MQTT")
+            ntfy_alert(
+                "[ESP32 %s] Reboot requested via MQTT" % self._label,
+                topic="projectbilal-events",
+                priority=2,
+                tags="arrows_counterclockwise",
+            )
+            self.mqtt_disconnect()
+            self.reboot_requested = True
+            return
+
         if action == "ble":
             asyncio.run(run_ble())
 
@@ -527,6 +597,7 @@ class MQTTHandler(object):
 
             if playback_confirmed:
                 self._play_confirmed_count += 1
+                self._consecutive_mem_failures = 0
                 time.sleep(2)
                 self._feed_wdt()
                 print("MQTT: Audio playback confirmed, starting...")
@@ -551,10 +622,22 @@ class MQTTHandler(object):
 
         except Exception as e:
             self._error_count += 1
+            self._errors_total += 1
             print("MQTT: Chromecast error: %s" % e)
             ntfy_alert("[ESP32 %s] Chromecast play failed: %s" % (self._label, e), priority=4, tags="warning")
             import sys
             sys.print_exception(e)
+
+            # Only out-of-memory failures count toward the reboot valve; a
+            # connectivity failure means the speaker is off, and rebooting
+            # ourselves would neither help nor stop. Deliberately not reset
+            # here — the counter clears only on a confirmed playback.
+            if self._is_memory_error(e):
+                self._consecutive_mem_failures += 1
+                print(
+                    "MQTT: memory-class cast failure %d/%d"
+                    % (self._consecutive_mem_failures, _MEM_FAILURE_REBOOT_THRESHOLD)
+                )
 
         finally:
             # Always disconnect to clean up resources
@@ -603,6 +686,24 @@ class MQTTHandler(object):
                     print("MQTT: Playback result queued for after reconnect")
             except Exception:
                 self._pending_playback_result = result
+
+            # Reboot valve. Internal DRAM exhaustion is unrecoverable in
+            # software — gc.collect() cannot touch that pool — and MQTT stays
+            # healthy throughout, so nothing else would ever restart us. Left
+            # alone, the device sits "online", ACKs every command and silently
+            # plays nothing indefinitely.
+            if self._consecutive_mem_failures >= _MEM_FAILURE_REBOOT_THRESHOLD:
+                print("MQTT: out of memory for casting, rebooting to recover")
+                ntfy_alert(
+                    "[ESP32 %s] Rebooting: %d consecutive out-of-memory cast failures"
+                    % (self._label, self._consecutive_mem_failures),
+                    priority=4,
+                    tags="warning",
+                )
+                # Retained "offline" + graceful disconnect (suppresses the LWT)
+                # so the status doesn't read "online" through the reboot window.
+                self.mqtt_disconnect()
+                self.reboot_requested = True
 
     def mqtt_run(self):
         print("Connected and listening to MQTT Broker")
@@ -670,13 +771,24 @@ class MQTTHandler(object):
                     health_counter = 0
                     try:
                         import gc
+                        # free_mem is the MicroPython GC heap; dram_* is the
+                        # ESP-IDF internal heap mbedTLS actually allocates from.
+                        # They move independently — a wedged device has been
+                        # observed with MORE free_mem than a healthy one — so
+                        # dram_largest is the number to watch for cast health.
+                        dram_free, dram_largest, dram_min = self._dram_stats()
                         health = json.dumps({
                             "type": "health",
                             "uptime": int(time.time() - self._start_time),
                             "plays": self._play_count,
                             "confirmed": self._play_confirmed_count,
                             "errors": self._error_count,
+                            "errors_total": self._errors_total,
                             "free_mem": gc.mem_free(),
+                            "dram_free": dram_free,
+                            "dram_largest": dram_largest,
+                            "dram_min": dram_min,
+                            "reset_cause": machine.reset_cause(),
                             "firmware": FIRMWARE_VERSION,
                         })
                         self.mqtt.publish(f"projectbilal/{self.id}/health", health)
@@ -717,6 +829,7 @@ class MQTTHandler(object):
             except Exception as e:
                 self.connected = False  # Mark disconnected immediately
                 self._error_count += 1
+                self._errors_total += 1
                 error_str = str(e)
 
                 if (
@@ -818,7 +931,11 @@ class MQTTHandler(object):
                         reconnect_attempts = 0
                         reconnect_delay = 5
                         counter = 0
-                        health_counter = 0
+                        # health_counter is deliberately NOT reset here. It used
+                        # to be, which meant a device dropping more often than
+                        # every _HEALTH_INTERVAL ticks never published health at
+                        # all — silencing exactly the flaky devices whose
+                        # telemetry is most worth having.
                     else:
                         print("Reconnection failed")
                         ntfy_alert(

@@ -49,6 +49,7 @@ _NTFY_BASE = "http://34.53.103.114"
 
 
 def ntfy_alert(message, topic="projectbilal-errors", priority=None, tags=None):
+    resp = None
     try:
         import urequests
 
@@ -58,9 +59,19 @@ def ntfy_alert(message, topic="projectbilal-errors", priority=None, tags=None):
             headers["Priority"] = str(priority)
         if tags:
             headers["Tags"] = tags
-        urequests.post(url, data=message, headers=headers)
+        resp = urequests.post(url, data=message, headers=headers)
     except Exception:
         pass
+    finally:
+        # Always release the socket. Leaving it for GC strands the underlying
+        # LWIP buffers in ESP-IDF internal DRAM — the same pool mbedTLS draws
+        # from for the Chromecast TLS handshake. Alerts fire from ~24 call
+        # sites, so a leak here starves casting long before anything else.
+        if resp is not None:
+            try:
+                resp.close()
+            except Exception:
+                pass
 
 
 # get mac address for mqtt connection
