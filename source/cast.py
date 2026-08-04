@@ -17,6 +17,13 @@ _NS_CONN = b"urn:x-cast:com.google.cast.tp.connection"
 _NS_RECV = b"urn:x-cast:com.google.cast.receiver"
 _NS_MEDIA = b"urn:x-cast:com.google.cast.media"
 
+# play_url failure reasons, reported via Chromecast.last_error. These mean very
+# different things: NO_SESSION is guaranteed silence (the audio was never even
+# requested), while NO_MEDIA_ACK usually means it IS playing and we just didn't
+# hear back in time. The caller must not treat them alike.
+ERR_NO_SESSION = "no_session"
+ERR_NO_MEDIA_ACK = "no_media_ack"
+
 # App ID for the Default Media Receiver (used for audio/video streaming)
 _DEFAULT_MEDIA_APP_ID = b"CC1AD845"
 
@@ -68,6 +75,11 @@ class Chromecast(object):
 
     def __init__(self, cast_ip, cast_port, timeout_s=5):
         self.ip = cast_ip
+        # Which step play_url last failed at (ERR_* above), or None. Kept as an
+        # attribute rather than folded into the return value so play_url still
+        # returns a plain True/False — cast.py can be OTA'd on its own, and an
+        # older mqtt.py must keep behaving identically against a newer cast.py.
+        self.last_error = None
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._sock.settimeout(timeout_s)
         self.s = None
@@ -160,6 +172,8 @@ class Chromecast(object):
             url: The media URL to play
             volume: Optional volume level (0.0 to 1.0). If None, volume is not changed.
         """
+        self.last_error = None
+
         if isinstance(url, str):
             url_b = url.encode()
         else:
@@ -178,7 +192,10 @@ class Chromecast(object):
         # 2. Wait for the new session's transport ID
         transport_id = self._wait_for_transport_id(timeout_ms=8000)
         if not transport_id:
+            # Speaker never handed us a session, so LOAD below was never sent.
+            # Nothing is playing and nothing can be interrupted by a retry.
             print("Error: Failed to get transport ID for new session.")
+            self.last_error = ERR_NO_SESSION
             return False
 
         # 3. Connect to the media session transport
@@ -211,8 +228,17 @@ class Chromecast(object):
         self._send(_frame(_NS_MEDIA, load_payload, dest=transport_id))
 
         # 6. Wait for MEDIA_STATUS confirmation with timeout
+        return self.wait_for_media_ack(8000)
+
+    def wait_for_media_ack(self, timeout_ms=8000):
+        """Listen for MEDIA_STATUS confirming our media started.
+
+        Split out of play_url so the caller can listen for another window on
+        the SAME connection when the first one expires. An idle speaker can
+        take longer than one window to get going, and re-sending LOAD would
+        restart audio that is already playing.
+        """
         start = self._ticks_ms()
-        timeout_ms = 8000  # 8 seconds total for confirmation
         while self._ticks_diff(self._ticks_ms(), start) < timeout_ms:
             try:
                 status = self.read_message()
@@ -220,9 +246,13 @@ class Chromecast(object):
                 time.sleep(0.3)
                 continue  # Retry on socket timeout, don't give up
             if b'"type":"MEDIA_STATUS"' in status and b'"Bilal Cast"' in status:
+                self.last_error = None
                 return True
             time.sleep(0.2)  # Brief delay to avoid busy-looping
 
+        # LOAD was sent and accepted; we just never saw the acknowledgement.
+        # The audio is most likely playing, so callers must not restart it.
+        self.last_error = ERR_NO_MEDIA_ACK
         return False
 
     def _wait_for_transport_id(self, timeout_ms=4000):

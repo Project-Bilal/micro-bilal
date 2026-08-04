@@ -552,6 +552,10 @@ class MQTTHandler(object):
         import gc
         device = None
         playback_confirmed = False
+        # Set before the try: the finally block reports these, and an exception
+        # from Chromecast() would otherwise leave them undefined.
+        reason = None
+        retried = False
         self._play_count += 1
         try:
             print(
@@ -586,14 +590,38 @@ class MQTTHandler(object):
                     raise
 
             # Play URL with volume (volume is set after app launch, before media load)
-            if vol is not None:
-                ntfy_alert(
-                    "[ESP32 %s] Volume set to %s for %s" % (self._label, vol, label),
-                    topic="projectbilal-events",
-                    priority=2,
-                    tags="speaker",
-                )
+            print("MQTT: connected to speaker, loading media (vol %s)" % vol)
             playback_confirmed = device.play_url(url, volume=vol)
+            reason = getattr(device, "last_error", None)
+
+            # An idle speaker can be slower than one timeout window. The connect
+            # path above already retries on ETIMEDOUT; this is the same problem
+            # one step later. How we retry depends on how far we got.
+            if not playback_confirmed:
+                retried = True
+                if reason == "no_media_ack":
+                    # Media was already handed over and is probably playing.
+                    # Listen longer on the SAME connection — re-sending LOAD
+                    # would restart audio mid-adhan.
+                    print("MQTT: no ack yet, listening for another window")
+                    self._feed_wdt()
+                    playback_confirmed = device.wait_for_media_ack(8000)
+                else:
+                    # no_session (or unknown): nothing was ever requested, so a
+                    # fresh connection can't interrupt anything.
+                    print("MQTT: no session (%s), retrying on a new connection" % reason)
+                    try:
+                        device.disconnect()
+                    except Exception:
+                        pass
+                    device = None
+                    gc.collect()
+                    time.sleep(3)
+                    self._feed_wdt()
+                    device = Chromecast(ip, port)
+                    playback_confirmed = device.play_url(url, volume=vol)
+                reason = getattr(device, "last_error", None)
+                self._feed_wdt()
 
             if playback_confirmed:
                 self._play_confirmed_count += 1
@@ -601,24 +629,45 @@ class MQTTHandler(object):
                 time.sleep(2)
                 self._feed_wdt()
                 print("MQTT: Audio playback confirmed, starting...")
-                ntfy_alert(
-                    "[ESP32 %s] Playback confirmed: %s" % (self._label, label),
-                    topic="projectbilal-events",
-                    priority=2,
-                    tags="speaker",
-                )
+                # "after retry" is deliberately its own message: a rise in these
+                # means speakers are going idle, which is worth seeing BEFORE
+                # anyone actually misses a prayer.
+                if retried:
+                    ntfy_alert(
+                        "[ESP32 %s] Playback confirmed after retry: %s" % (self._label, label),
+                        topic="projectbilal-events",
+                        priority=2,
+                        tags="speaker",
+                    )
+                else:
+                    ntfy_alert(
+                        "[ESP32 %s] Playback confirmed: %s" % (self._label, label),
+                        topic="projectbilal-events",
+                        priority=2,
+                        tags="speaker",
+                    )
             else:
-                print(
-                    "MQTT: Playback not confirmed, waiting longer for Chromecast to start..."
-                )
+                print("MQTT: playback failed (%s)" % reason)
                 time.sleep(5)
                 self._feed_wdt()
-                ntfy_alert(
-                    "[ESP32 %s] Playback NOT confirmed: %s" % (self._label, label),
-                    topic="projectbilal-events",
-                    priority=3,
-                    tags="warning",
-                )
+                if reason == "no_media_ack":
+                    # Media was accepted; we just never got confirmation. Most
+                    # likely it played. Low priority — not worth waking anyone.
+                    ntfy_alert(
+                        "[ESP32 %s] Sent to speaker but unconfirmed: %s" % (self._label, label),
+                        topic="projectbilal-events",
+                        priority=3,
+                        tags="warning",
+                    )
+                else:
+                    # Speaker never gave us a session, even after a retry. The
+                    # audio was never requested, so this is real silence.
+                    ntfy_alert(
+                        "[ESP32 %s] No response from speaker, nothing played: %s"
+                        % (self._label, label),
+                        priority=4,
+                        tags="warning",
+                    )
 
         except Exception as e:
             self._error_count += 1
@@ -674,6 +723,8 @@ class MQTTHandler(object):
             result = json.dumps({
                 "type": "playback_result",
                 "confirmed": playback_confirmed,
+                "reason": reason,
+                "retried": retried,
                 "label": label,
                 "timestamp": _unix_now(),
             })
