@@ -30,11 +30,20 @@ _REJECTION_MARKERS = (
     b"LOAD_CANCELLED",
     b"INVALID_REQUEST",
     b"detailedErrorCode",
+    b'"idleReason":"ERROR"',
 )
+# Signals that audio actually started. The receiver only echoes our title once
+# it has populated media metadata, which lags the first MEDIA_STATUS by seconds
+# — playerState is in there immediately. Matching on the title alone is what
+# made every Kirkland play need a retry for three days.
+_PLAYING_STATES = (b'"playerState":"PLAYING"', b'"playerState":"BUFFERING"')
+_EMPTY_STATUS = b'"status":[]'
+_IDLE_ERROR = b'"idleReason":"ERROR"'
 # Bound on what we retain per play. This runs on a device where internal DRAM
 # fragmentation is the known enemy, so the diagnostic must not become a leak.
 _MAX_SEEN_TYPES = 10
 _MAX_ERROR_DETAIL = 160
+_MAX_STATUS_SAMPLE = 200
 
 # play_url failure reasons, reported via Chromecast.last_error. These mean very
 # different things: NO_SESSION is guaranteed silence (the audio was never even
@@ -105,6 +114,7 @@ class Chromecast(object):
         self.ping_count = 0
         self.seen_types = []
         self.last_error_detail = None
+        self.first_media_status = None
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._sock.settimeout(timeout_s)
         self.s = None
@@ -188,16 +198,24 @@ class Chromecast(object):
             pass  # best-effort; the caller's timeout still governs
         return True
 
+    @staticmethod
+    def _payload(msg, limit):
+        """The JSON payload of a frame, truncated. Slices from the first brace
+        because everything before it is protobuf framing that would only
+        garble the alert."""
+        start = msg.find(b"{")
+        return (msg[start:] if start != -1 else msg)[:limit]
+
     def _note_discarded(self, msg):
         """Record a message we read but did not match, for the failure alert."""
         if any(marker in msg for marker in _REJECTION_MARKERS):
             if self.last_error_detail is None:
-                # Slice from the first brace: the JSON payload is the last
-                # field in the frame, so everything before it is protobuf
-                # framing that would only garble the alert.
-                start = msg.find(b"{")
-                payload = msg[start:] if start != -1 else msg
-                self.last_error_detail = payload[:_MAX_ERROR_DETAIL]
+                self.last_error_detail = self._payload(msg, _MAX_ERROR_DETAIL)
+        # Keep the first MEDIA_STATUS we rejected, verbatim. If the playerState
+        # theory is also wrong, this is the payload that says why, instead of
+        # another round of guessing from message types alone.
+        if self.first_media_status is None and b'"type":"MEDIA_STATUS"' in msg:
+            self.first_media_status = self._payload(msg, _MAX_STATUS_SAMPLE)
         mtype = self._msg_type(msg)
         if mtype and mtype not in self.seen_types:
             if len(self.seen_types) < _MAX_SEEN_TYPES:
@@ -211,6 +229,24 @@ class Chromecast(object):
         except Exception:
             return str(raw)
 
+    @staticmethod
+    def _is_playback_started(msg):
+        """True when a MEDIA_STATUS says our audio is actually going.
+
+        Deliberately broader than the old test and never narrower: title OR
+        playerState. The old test required our own title, which the receiver
+        only echoes after populating media metadata — so a perfectly healthy
+        play looked like a failure until the metadata caught up. An empty
+        status array is excluded: that is the receiver saying it has nothing
+        loaded, even though it is technically a MEDIA_STATUS."""
+        if b'"type":"MEDIA_STATUS"' not in msg:
+            return False
+        if _EMPTY_STATUS in msg:
+            return False
+        if b'"Bilal Cast"' in msg:
+            return True
+        return any(s in msg for s in _PLAYING_STATES)
+
     def diagnostics(self):
         """One-line summary of what the speaker sent back, for ntfy."""
         parts = ["pings=%d" % self.ping_count]
@@ -220,6 +256,8 @@ class Chromecast(object):
             parts.append("saw=nothing")
         if self.last_error_detail:
             parts.append("reject=%s" % self._text(self.last_error_detail))
+        if self.first_media_status:
+            parts.append("status=%s" % self._text(self.first_media_status))
         return " ".join(parts)
 
     # --- Utility Methods for Time (MicroPython compatibility) ---
@@ -269,6 +307,7 @@ class Chromecast(object):
         self.ping_count = 0
         self.seen_types = []
         self.last_error_detail = None
+        self.first_media_status = None
 
         if isinstance(url, str):
             url_b = url.encode()
@@ -341,13 +380,19 @@ class Chromecast(object):
             except OSError:
                 time.sleep(0.3)
                 continue  # Retry on socket timeout, don't give up
-            if b'"type":"MEDIA_STATUS"' in status and b'"Bilal Cast"' in status:
+            if self._is_playback_started(status):
                 self.last_error = None
                 return True
             # Answer heartbeats before discarding anything, then record what
             # this was so a failure can say what the speaker actually replied.
             if not self._maybe_pong(status):
                 self._note_discarded(status)
+                if _IDLE_ERROR in status:
+                    # The receiver has given up on the media. Waiting out the
+                    # rest of the window (and then a whole second one) only
+                    # delays an alert whose answer is already known.
+                    self.last_error = ERR_NO_MEDIA_ACK
+                    return False
             time.sleep(0.2)  # Brief delay to avoid busy-looping
 
         # LOAD went out on the socket and nothing came back. This used to claim
