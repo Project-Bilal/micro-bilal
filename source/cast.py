@@ -16,6 +16,25 @@ _RECV = b"receiver-0"
 _NS_CONN = b"urn:x-cast:com.google.cast.tp.connection"
 _NS_RECV = b"urn:x-cast:com.google.cast.receiver"
 _NS_MEDIA = b"urn:x-cast:com.google.cast.media"
+# Receivers PING senders on this namespace and expect a PONG. A sender that
+# never answers is treated as dead and its session is torn down — which from
+# our side is indistinguishable from a slow speaker, because the LOAD we sent
+# simply never gets acknowledged.
+_NS_HEARTBEAT = b"urn:x-cast:com.google.cast.tp.heartbeat"
+
+# Payload markers that mean the receiver rejected us outright, as opposed to
+# just being slow. Worth keeping verbatim: they are the difference between
+# "speaker was sleepy" and "the media never had a chance".
+_REJECTION_MARKERS = (
+    b"LOAD_FAILED",
+    b"LOAD_CANCELLED",
+    b"INVALID_REQUEST",
+    b"detailedErrorCode",
+)
+# Bound on what we retain per play. This runs on a device where internal DRAM
+# fragmentation is the known enemy, so the diagnostic must not become a leak.
+_MAX_SEEN_TYPES = 10
+_MAX_ERROR_DETAIL = 160
 
 # play_url failure reasons, reported via Chromecast.last_error. These mean very
 # different things: NO_SESSION is guaranteed silence (the audio was never even
@@ -80,6 +99,12 @@ class Chromecast(object):
         # returns a plain True/False — cast.py can be OTA'd on its own, and an
         # older mqtt.py must keep behaving identically against a newer cast.py.
         self.last_error = None
+        # Diagnostics for a failed play: what the speaker actually sent back.
+        # Without these a rejection and a sleepy speaker look identical, since
+        # wait_for_media_ack only ever matched the success pattern.
+        self.ping_count = 0
+        self.seen_types = []
+        self.last_error_detail = None
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._sock.settimeout(timeout_s)
         self.s = None
@@ -132,6 +157,71 @@ class Chromecast(object):
             raise OSError("invalid cast frame size: %d" % siz)
         return self._read_exact(siz)
 
+    @staticmethod
+    def _msg_type(msg):
+        """Extract the JSON "type" field from a raw frame, or None.
+
+        Same find-to-next-quote trick _wait_for_transport_id uses; the payload
+        is plain JSON embedded in the protobuf body, so no real parse needed."""
+        key = b'"type":"'
+        i = msg.find(key)
+        if i == -1:
+            return None
+        j = msg.find(b'"', i + len(key))
+        if j == -1:
+            return None
+        return msg[i + len(key) : j]
+
+    def _maybe_pong(self, msg):
+        """Answer a Cast heartbeat PING. Returns True if this was a PING.
+
+        Nothing in this file used to handle the heartbeat namespace, so every
+        PING was read and dropped. Receivers tear down senders that go quiet,
+        which is why listening for a longer window never rescued a stalled
+        play — by then the session was already gone."""
+        if b'"type":"PING"' not in msg:
+            return False
+        self.ping_count += 1
+        try:
+            self._send(_frame(_NS_HEARTBEAT, b'{"type":"PONG"}'))
+        except Exception:
+            pass  # best-effort; the caller's timeout still governs
+        return True
+
+    def _note_discarded(self, msg):
+        """Record a message we read but did not match, for the failure alert."""
+        if any(marker in msg for marker in _REJECTION_MARKERS):
+            if self.last_error_detail is None:
+                # Slice from the first brace: the JSON payload is the last
+                # field in the frame, so everything before it is protobuf
+                # framing that would only garble the alert.
+                start = msg.find(b"{")
+                payload = msg[start:] if start != -1 else msg
+                self.last_error_detail = payload[:_MAX_ERROR_DETAIL]
+        mtype = self._msg_type(msg)
+        if mtype and mtype not in self.seen_types:
+            if len(self.seen_types) < _MAX_SEEN_TYPES:
+                self.seen_types.append(mtype)
+
+    @staticmethod
+    def _text(raw):
+        """bytes -> str without assuming MicroPython supports decode(errors=)."""
+        try:
+            return raw.decode()
+        except Exception:
+            return str(raw)
+
+    def diagnostics(self):
+        """One-line summary of what the speaker sent back, for ntfy."""
+        parts = ["pings=%d" % self.ping_count]
+        if self.seen_types:
+            parts.append("saw=%s" % ",".join(self._text(t) for t in self.seen_types))
+        else:
+            parts.append("saw=nothing")
+        if self.last_error_detail:
+            parts.append("reject=%s" % self._text(self.last_error_detail))
+        return " ".join(parts)
+
     # --- Utility Methods for Time (MicroPython compatibility) ---
 
     @staticmethod
@@ -173,6 +263,12 @@ class Chromecast(object):
             volume: Optional volume level (0.0 to 1.0). If None, volume is not changed.
         """
         self.last_error = None
+        # Reset diagnostics here rather than in wait_for_media_ack — the caller
+        # calls that a second time for an extra listen window, and the counts
+        # must accumulate across both windows of the same play.
+        self.ping_count = 0
+        self.seen_types = []
+        self.last_error_detail = None
 
         if isinstance(url, str):
             url_b = url.encode()
@@ -248,10 +344,18 @@ class Chromecast(object):
             if b'"type":"MEDIA_STATUS"' in status and b'"Bilal Cast"' in status:
                 self.last_error = None
                 return True
+            # Answer heartbeats before discarding anything, then record what
+            # this was so a failure can say what the speaker actually replied.
+            if not self._maybe_pong(status):
+                self._note_discarded(status)
             time.sleep(0.2)  # Brief delay to avoid busy-looping
 
-        # LOAD was sent and accepted; we just never saw the acknowledgement.
-        # The audio is most likely playing, so callers must not restart it.
+        # LOAD went out on the socket and nothing came back. This used to claim
+        # the audio was "most likely playing" — a confirmed-silent Asr on
+        # 2026-08-04 disproved that. Nothing here verifies the receiver ever
+        # accepted the LOAD; _send only proves bytes reached the socket. Treat
+        # this as a possible silent failure and read diagnostics() for what the
+        # speaker actually sent instead.
         self.last_error = ERR_NO_MEDIA_ACK
         return False
 
@@ -269,6 +373,11 @@ class Chromecast(object):
             except OSError:
                 time.sleep(0.3)
                 continue  # Don't abort on single socket timeout
+
+            # PINGs arrive during app launch too, not just during media load —
+            # ignoring them here would let the session die before LOAD is sent.
+            if self._maybe_pong(msg):
+                continue
 
             # CRITICAL FIX: Ensure the message is for the Default Media Receiver app
             if _DEFAULT_MEDIA_APP_ID in msg:

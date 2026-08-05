@@ -659,8 +659,16 @@ class MQTTHandler(object):
                 # means speakers are going idle, which is worth seeing BEFORE
                 # anyone actually misses a prayer.
                 if retried:
+                    # Carries the diagnostic too: a slow play that succeeded is
+                    # the clearest place to see whether heartbeats were in play.
+                    try:
+                        diag_fn = getattr(device, "diagnostics", None)
+                        retry_diag = diag_fn() if diag_fn else ""
+                    except Exception:
+                        retry_diag = ""
                     ntfy_alert(
-                        "[ESP32 %s] Playback confirmed after retry: %s" % (self._label, label),
+                        "[ESP32 %s] Playback confirmed after retry: %s | %s"
+                        % (self._label, label, retry_diag),
                         topic="projectbilal-events",
                         priority=2,
                         tags="speaker",
@@ -676,21 +684,32 @@ class MQTTHandler(object):
                 print("MQTT: playback failed (%s)" % reason)
                 time.sleep(5)
                 self._feed_wdt()
+                # What the speaker actually sent back. Defensive getattr: an OTA
+                # can land mqtt.py and cast.py out of step, and a missing
+                # diagnostic must never turn a failed play into a crash.
+                try:
+                    diag_fn = getattr(device, "diagnostics", None)
+                    diag = diag_fn() if diag_fn else ""
+                except Exception:
+                    diag = ""
                 if reason == "no_media_ack":
-                    # Media was accepted; we just never got confirmation. Most
-                    # likely it played. Low priority — not worth waking anyone.
+                    # We sent LOAD and never saw MEDIA_STATUS come back. This
+                    # was previously filed as "probably played, priority 3" —
+                    # a confirmed-silent Asr on 2026-08-04 disproved that, and
+                    # nothing here ever verified the receiver accepted the LOAD.
                     ntfy_alert(
-                        "[ESP32 %s] Sent to speaker but unconfirmed: %s" % (self._label, label),
+                        "[ESP32 %s] Sent to speaker, never confirmed playing: %s | %s"
+                        % (self._label, label, diag),
                         topic="projectbilal-events",
-                        priority=3,
+                        priority=4,
                         tags="warning",
                     )
                 else:
                     # Speaker never gave us a session, even after a retry. The
                     # audio was never requested, so this is real silence.
                     ntfy_alert(
-                        "[ESP32 %s] No response from speaker, nothing played: %s"
-                        % (self._label, label),
+                        "[ESP32 %s] No response from speaker, nothing played: %s | %s"
+                        % (self._label, label, diag),
                         priority=4,
                         tags="warning",
                     )
