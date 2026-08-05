@@ -19,6 +19,11 @@ _MQTT_PORT = const(1883)
 _MEM_FAILURE_REBOOT_THRESHOLD = const(2)
 # MicroPython's epoch is 2000-01-01; add this to reach the Unix (1970) epoch.
 _UNIX_OFFSET = const(946684800)
+# Connect failures worth a second attempt. A sleeping single speaker times out;
+# a speaker group that is reforming resets the connection outright. Both are
+# transient. Before 1.11 only ETIMEDOUT was retried, so an ECONNRESET went
+# straight to silence with no retry at all — that cost a full Dhuhr on 2026-08-04.
+_TRANSIENT_CONNECT_ERRORS = ("ETIMEDOUT", "ECONNRESET")
 
 
 def _unix_now():
@@ -44,6 +49,11 @@ class MQTTHandler(object):
         self._play_confirmed_count = 0
         self._error_count = 0
         self._errors_total = 0  # cumulative; _error_count is zeroed each report
+        # errors_total mixes two unrelated failures, which makes a device on a
+        # flaky network look like it is failing to cast. Split them, but keep
+        # the combined counter so existing history stays comparable.
+        self._cast_errors_total = 0
+        self._conn_errors_total = 0
         self._consecutive_mem_failures = 0
         self._start_time = time.time()
         self._pending_playback_result = None
@@ -116,10 +126,14 @@ class MQTTHandler(object):
 
             # Each region is (total, free, largest_free, min_free).
             regions = esp32.idf_heap_info(esp32.HEAP_DATA)
+            # min_free is summed, not min()'d: taking the minimum across regions
+            # just reports whichever tiny region sits lowest, which pinned this
+            # at 4 bytes on every device forever. Summed, it is a low-water mark
+            # for total free DRAM and actually moves.
             return (
                 sum(r[1] for r in regions),
                 max(r[2] for r in regions),
-                min(r[3] for r in regions),
+                sum(r[3] for r in regions),
             )
         except Exception:
             return None, None, None
@@ -574,16 +588,28 @@ class MQTTHandler(object):
             try:
                 device = Chromecast(ip, port)
             except OSError as e:
-                if "ETIMEDOUT" in str(e):
-                    print("MQTT: Speaker may be asleep, retrying in 3s...")
+                reason = None
+                for candidate in _TRANSIENT_CONNECT_ERRORS:
+                    if candidate in str(e):
+                        reason = candidate
+                        break
+                if reason:
+                    # A reforming group takes longer to come back than a
+                    # sleeping speaker, so give ECONNRESET a longer breath.
+                    backoff = 5 if reason == "ECONNRESET" else 3
+                    print(
+                        "MQTT: connect failed (%s), retrying in %ds..."
+                        % (reason, backoff)
+                    )
                     ntfy_alert(
-                        "[ESP32 %s] Speaker wake retry: %s" % (self._label, label),
+                        "[ESP32 %s] Speaker connect retry (%s): %s"
+                        % (self._label, reason, label),
                         topic="projectbilal-events",
                         priority=2,
                         tags="speaker",
                     )
                     gc.collect()
-                    time.sleep(3)
+                    time.sleep(backoff)
                     self._feed_wdt()
                     device = Chromecast(ip, port)
                 else:
@@ -672,6 +698,7 @@ class MQTTHandler(object):
         except Exception as e:
             self._error_count += 1
             self._errors_total += 1
+            self._cast_errors_total += 1
             print("MQTT: Chromecast error: %s" % e)
             ntfy_alert("[ESP32 %s] Chromecast play failed: %s" % (self._label, e), priority=4, tags="warning")
             import sys
@@ -835,6 +862,8 @@ class MQTTHandler(object):
                             "confirmed": self._play_confirmed_count,
                             "errors": self._error_count,
                             "errors_total": self._errors_total,
+                            "cast_errors_total": self._cast_errors_total,
+                            "conn_errors_total": self._conn_errors_total,
                             "free_mem": gc.mem_free(),
                             "dram_free": dram_free,
                             "dram_largest": dram_largest,
@@ -881,6 +910,7 @@ class MQTTHandler(object):
                 self.connected = False  # Mark disconnected immediately
                 self._error_count += 1
                 self._errors_total += 1
+                self._conn_errors_total += 1
                 error_str = str(e)
 
                 if (
