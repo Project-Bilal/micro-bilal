@@ -138,6 +138,96 @@ class MQTTHandler(object):
         except Exception:
             return None, None, None
 
+    @staticmethod
+    def _net_stats():
+        """Station-side network identity as (ip, ssid, bssid, rssi).
+
+        Casting is a LAN operation, so when a cast times out the first
+        question is whether the ESP32 and the speaker are even on the same
+        subnet, and which access point the ESP32 is associated to. Neither
+        was reportable before 1.14, which cost a full day of guessing on
+        2026-08-05 when Kirkland could reach the internet fine but could not
+        open a socket to a speaker its own phone could resolve.
+
+        Every field is fetched independently: WLAN.config() raises for keys a
+        given port does not implement, and one unsupported key must not take
+        the rest of the report down with it. Read-only — nothing here touches
+        the radio state."""
+        ip = ssid = bssid = rssi = None
+        try:
+            import network
+
+            wlan = network.WLAN(network.STA_IF)
+            try:
+                ip = wlan.ifconfig()[0]
+            except Exception:
+                pass
+            for key in ("essid", "ssid"):
+                try:
+                    ssid = wlan.config(key)
+                    break
+                except Exception:
+                    continue
+            try:
+                import binascii
+
+                bssid = binascii.hexlify(wlan.config("bssid"), ":").decode()
+            except Exception:
+                pass
+            try:
+                rssi = wlan.status("rssi")
+            except Exception:
+                pass
+        except Exception:
+            pass
+        return ip, ssid, bssid, rssi
+
+    def _publish_health(self, reset_counters=True):
+        """Build and publish one health report. Best-effort by design — a
+        failed report must never disturb the MQTT loop that plays the athan.
+
+        reset_counters is False for on-demand polls so that asking for a
+        report does not blank the interval counters the next periodic report
+        would have carried."""
+        try:
+            import gc
+
+            # free_mem is the MicroPython GC heap; dram_* is the ESP-IDF
+            # internal heap mbedTLS actually allocates from. They move
+            # independently — a wedged device has been observed with MORE
+            # free_mem than a healthy one — so dram_largest is the number to
+            # watch for cast health.
+            dram_free, dram_largest, dram_min = self._dram_stats()
+            ip, ssid, bssid, rssi = self._net_stats()
+            health = json.dumps({
+                "type": "health",
+                "uptime": int(time.time() - self._start_time),
+                "plays": self._play_count,
+                "confirmed": self._play_confirmed_count,
+                "errors": self._error_count,
+                "errors_total": self._errors_total,
+                "cast_errors_total": self._cast_errors_total,
+                "conn_errors_total": self._conn_errors_total,
+                "free_mem": gc.mem_free(),
+                "dram_free": dram_free,
+                "dram_largest": dram_largest,
+                "dram_min": dram_min,
+                "reset_cause": machine.reset_cause(),
+                "firmware": FIRMWARE_VERSION,
+                "ip": ip,
+                "ssid": ssid,
+                "bssid": bssid,
+                "rssi": rssi,
+            })
+            self.mqtt.publish(f"projectbilal/{self.id}/health", health)
+            if reset_counters:
+                self._play_count = 0
+                self._play_confirmed_count = 0
+                self._error_count = 0
+            return True
+        except Exception:
+            return False  # Best-effort
+
     def mqtt_connect(self):
         self.mqtt = MQTTClient(
             client_id=self.id,
@@ -479,6 +569,20 @@ class MQTTHandler(object):
             response = {"discovery_complete": True, "total_found": 0}
             self.mqtt.publish(topic, json.dumps(response))
             print("Discovery delegated to mobile app")
+
+        if action == "health":
+            """
+            Publish a health report immediately.
+
+            {"action": "health"}
+
+            Diagnostic escape hatch: the periodic report only fires every
+            ~10 minutes, and a device that just rebooted is 10 minutes from
+            saying anything at all. Counters are left untouched so polling
+            does not distort the periodic series.
+            """
+            print("Health report requested via MQTT")
+            self._publish_health(reset_counters=False)
 
         if action == "set_device_name":
             name = props.get("name")
@@ -866,37 +970,7 @@ class MQTTHandler(object):
                 # Periodic health reporting
                 if health_counter >= _HEALTH_INTERVAL:
                     health_counter = 0
-                    try:
-                        import gc
-                        # free_mem is the MicroPython GC heap; dram_* is the
-                        # ESP-IDF internal heap mbedTLS actually allocates from.
-                        # They move independently — a wedged device has been
-                        # observed with MORE free_mem than a healthy one — so
-                        # dram_largest is the number to watch for cast health.
-                        dram_free, dram_largest, dram_min = self._dram_stats()
-                        health = json.dumps({
-                            "type": "health",
-                            "uptime": int(time.time() - self._start_time),
-                            "plays": self._play_count,
-                            "confirmed": self._play_confirmed_count,
-                            "errors": self._error_count,
-                            "errors_total": self._errors_total,
-                            "cast_errors_total": self._cast_errors_total,
-                            "conn_errors_total": self._conn_errors_total,
-                            "free_mem": gc.mem_free(),
-                            "dram_free": dram_free,
-                            "dram_largest": dram_largest,
-                            "dram_min": dram_min,
-                            "reset_cause": machine.reset_cause(),
-                            "firmware": FIRMWARE_VERSION,
-                        })
-                        self.mqtt.publish(f"projectbilal/{self.id}/health", health)
-                        # Reset counters after successful report to prevent unbounded growth
-                        self._play_count = 0
-                        self._play_confirmed_count = 0
-                        self._error_count = 0
-                    except Exception:
-                        pass  # Best-effort
+                    self._publish_health()
 
                 if counter >= _PING_INTERVAL:
                     counter = 0

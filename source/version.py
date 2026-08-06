@@ -1,2 +1,2 @@
 # Firmware version info
-FIRMWARE_VERSION = "1.13"
+FIRMWARE_VERSION = "1.14"
