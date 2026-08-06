@@ -350,10 +350,15 @@ class Chromecast(object):
             # sessionId and transportId are two different fields of the same
             # applications[] entry: the transportId is who you address the
             # message to, the sessionId is which launched session it belongs
-            # to. This sent the transportId in both slots. A plain Chromecast
-            # tolerates that; nothing guarantees every receiver does.
-            # Falls back to transport_id when the speaker sends no sessionId,
-            # which is exactly the old behaviour, so this cannot be worse.
+            # to. This sent the transportId in both slots.
+            #
+            # Measured on Kirkland 2026-08-06: this speaker returns the SAME
+            # UUID for both, so the LOAD emitted here is byte-identical to what
+            # 1.14 sent and this fixed nothing observable. Kept because it is
+            # what the protocol actually specifies and pychromecast tracks them
+            # separately — a receiver that does distinguish them would have been
+            # silently broken. Falls back to transport_id when no sessionId is
+            # sent, which is the pre-1.15 behaviour.
             + (session_id or transport_id)
             + b'"}'
         )
@@ -444,30 +449,9 @@ class Chromecast(object):
                     # Both come out of the same status message, so they always
                     # describe the same session.
                     session_id = self._extract(msg, b'"sessionId":"')
-                    self._log_session_ids(session_id, transport_id)
                     return transport_id, session_id
 
         return None, None
-
-    @staticmethod
-    def _log_session_ids(session_id, transport_id):
-        """TEMPORARY (1.15): report both IDs so we can confirm on real hardware
-        that they differ before trusting the LOAD fix. Remove once verified."""
-        try:
-            from utils import ntfy_alert
-
-            ntfy_alert(
-                "[cast] session=%s transport=%s"
-                % (
-                    session_id.decode() if session_id else None,
-                    transport_id.decode() if transport_id else None,
-                ),
-                topic="projectbilal-events",
-                priority=1,
-                tags="mag",
-            )
-        except Exception:
-            pass
 
     def disconnect(self):
         """Close the connection to the Chromecast device."""
