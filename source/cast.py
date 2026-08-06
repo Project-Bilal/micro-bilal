@@ -169,18 +169,8 @@ class Chromecast(object):
 
     @staticmethod
     def _msg_type(msg):
-        """Extract the JSON "type" field from a raw frame, or None.
-
-        Same find-to-next-quote trick _wait_for_transport_id uses; the payload
-        is plain JSON embedded in the protobuf body, so no real parse needed."""
-        key = b'"type":"'
-        i = msg.find(key)
-        if i == -1:
-            return None
-        j = msg.find(b'"', i + len(key))
-        if j == -1:
-            return None
-        return msg[i + len(key) : j]
+        """Extract the JSON "type" field from a raw frame, or None."""
+        return Chromecast._extract(msg, b'"type":"')
 
     def _maybe_pong(self, msg):
         """Answer a Cast heartbeat PING. Returns True if this was a PING.
@@ -324,8 +314,8 @@ class Chromecast(object):
             )
         )
 
-        # 2. Wait for the new session's transport ID
-        transport_id = self._wait_for_transport_id(timeout_ms=8000)
+        # 2. Wait for the new session's transport ID and session ID
+        transport_id, session_id = self._wait_for_session(timeout_ms=8000)
         if not transport_id:
             # Speaker never handed us a session, so LOAD below was never sent.
             # Nothing is playing and nothing can be interrupted by a retry.
@@ -357,7 +347,14 @@ class Chromecast(object):
             + THUMB
             + b'"}]}},'
             b'"type":"LOAD","autoplay":true,"customData":{},"requestId":5,"sessionId":"'
-            + transport_id
+            # sessionId and transportId are two different fields of the same
+            # applications[] entry: the transportId is who you address the
+            # message to, the sessionId is which launched session it belongs
+            # to. This sent the transportId in both slots. A plain Chromecast
+            # tolerates that; nothing guarantees every receiver does.
+            # Falls back to transport_id when the speaker sends no sessionId,
+            # which is exactly the old behaviour, so this cannot be worse.
+            + (session_id or transport_id)
             + b'"}'
         )
         self._send(_frame(_NS_MEDIA, load_payload, dest=transport_id))
@@ -404,10 +401,26 @@ class Chromecast(object):
         self.last_error = ERR_NO_MEDIA_ACK
         return False
 
-    def _wait_for_transport_id(self, timeout_ms=4000):
-        """
-        Wait for a message containing a transportId associated with the launched App ID.
-        This is the fix for session ID confusion.
+    @staticmethod
+    def _extract(msg, key):
+        """Value of a JSON string field, or None. Byte scanning rather than
+        json.loads: RECEIVER_STATUS is large and parsing it costs internal DRAM
+        that the TLS session still needs."""
+        i = msg.find(key)
+        if i == -1:
+            return None
+        j = msg.find(b'"', i + len(key))
+        if j == -1:
+            return None
+        return msg[i + len(key) : j]
+
+    def _wait_for_session(self, timeout_ms=4000):
+        """Wait for RECEIVER_STATUS describing the app we just launched, and
+        return (transport_id, session_id) from that same applications entry.
+
+        The transportId addresses messages to the session; the sessionId says
+        which session they belong to. session_id may be None — the caller falls
+        back to transport_id, which is what this code always sent before 1.15.
         """
         start = self._ticks_ms()
         key = b'"transportId":"'
@@ -426,14 +439,35 @@ class Chromecast(object):
 
             # CRITICAL FIX: Ensure the message is for the Default Media Receiver app
             if _DEFAULT_MEDIA_APP_ID in msg:
-                i = msg.find(key)
-                if i != -1:
-                    j = msg.find(b'"', i + len(key))
-                    if j != -1:
-                        # transportId found and confirmed to be for the newly launched app
-                        return msg[i + len(key) : j]
+                transport_id = self._extract(msg, key)
+                if transport_id:
+                    # Both come out of the same status message, so they always
+                    # describe the same session.
+                    session_id = self._extract(msg, b'"sessionId":"')
+                    self._log_session_ids(session_id, transport_id)
+                    return transport_id, session_id
 
-        return None
+        return None, None
+
+    @staticmethod
+    def _log_session_ids(session_id, transport_id):
+        """TEMPORARY (1.15): report both IDs so we can confirm on real hardware
+        that they differ before trusting the LOAD fix. Remove once verified."""
+        try:
+            from utils import ntfy_alert
+
+            ntfy_alert(
+                "[cast] session=%s transport=%s"
+                % (
+                    session_id.decode() if session_id else None,
+                    transport_id.decode() if transport_id else None,
+                ),
+                topic="projectbilal-events",
+                priority=1,
+                tags="mag",
+            )
+        except Exception:
+            pass
 
     def disconnect(self):
         """Close the connection to the Chromecast device."""
