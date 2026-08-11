@@ -674,6 +674,7 @@ class MQTTHandler(object):
         # from Chromecast() would otherwise leave them undefined.
         reason = None
         retried = False
+        diag = ""
         self._play_count += 1
         try:
             print(
@@ -753,6 +754,21 @@ class MQTTHandler(object):
                 reason = getattr(device, "last_error", None)
                 self._feed_wdt()
 
+            # Capture the diagnostic once, here, while device is still the
+            # object that ran this play. It now rides the MQTT result as well as
+            # ntfy. ntfy_alert is a fire-and-forget POST that swallows its own
+            # failure (utils.py), so it is silently lost whenever WiFi drops
+            # after a cast — which is exactly when the diagnostic is worth
+            # having. The result in the finally block is queued and republished
+            # on reconnect, so it survives the same drop. Defensive getattr: an
+            # OTA can land mqtt.py and cast.py out of step, and a missing
+            # diagnostic must never turn a play into a crash.
+            try:
+                diag_fn = getattr(device, "diagnostics", None)
+                diag = diag_fn() if diag_fn else ""
+            except Exception:
+                diag = ""
+
             if playback_confirmed:
                 self._play_confirmed_count += 1
                 self._consecutive_mem_failures = 0
@@ -765,14 +781,9 @@ class MQTTHandler(object):
                 if retried:
                     # Carries the diagnostic too: a slow play that succeeded is
                     # the clearest place to see whether heartbeats were in play.
-                    try:
-                        diag_fn = getattr(device, "diagnostics", None)
-                        retry_diag = diag_fn() if diag_fn else ""
-                    except Exception:
-                        retry_diag = ""
                     ntfy_alert(
                         "[ESP32 %s] Playback confirmed after retry: %s | %s"
-                        % (self._label, label, retry_diag),
+                        % (self._label, label, diag),
                         topic="projectbilal-events",
                         priority=2,
                         tags="speaker",
@@ -788,14 +799,6 @@ class MQTTHandler(object):
                 print("MQTT: playback failed (%s)" % reason)
                 time.sleep(5)
                 self._feed_wdt()
-                # What the speaker actually sent back. Defensive getattr: an OTA
-                # can land mqtt.py and cast.py out of step, and a missing
-                # diagnostic must never turn a failed play into a crash.
-                try:
-                    diag_fn = getattr(device, "diagnostics", None)
-                    diag = diag_fn() if diag_fn else ""
-                except Exception:
-                    diag = ""
                 if reason == "no_media_ack":
                     # We sent LOAD and never saw MEDIA_STATUS come back. This
                     # was previously filed as "probably played, priority 3" —
@@ -876,6 +879,11 @@ class MQTTHandler(object):
                 "reason": reason,
                 "retried": retried,
                 "label": label,
+                # Firmware 1.16. What the speaker actually sent back, on the one
+                # path home that survives a post-cast WiFi drop. Bounded by
+                # cast.py (10 message types, 160 chars of error detail, 200 of
+                # status sample), so this cannot grow without that changing.
+                "diag": diag,
                 "timestamp": _unix_now(),
             })
             try:
