@@ -115,10 +115,22 @@ class Chromecast(object):
         self.seen_types = []
         self.last_error_detail = None
         self.first_media_status = None
+        # Milliseconds spent in each stage of a play, surfaced by diagnostics().
+        # Firmware 1.17. Every stage below runs against a fixed budget, and
+        # until now a failure only said WHICH budget expired, never how close a
+        # successful play came to expiring too. Without that, raising a timeout
+        # is a guess: a play that acks at 400ms and one that acks at 7900ms are
+        # both recorded as a plain success. Plain ints, so nothing here can
+        # grow the diagnostic or hold a reference alive.
+        self.t_connect = 0
+        self.t_session = 0
+        self.t_volume = 0
+        self.t_ack = 0
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._sock.settimeout(timeout_s)
         self.s = None
 
+        _t0 = self._ticks_ms()
         try:
             # Connect and wrap socket with SSL
             self._sock.connect((self.ip, cast_port))
@@ -130,6 +142,7 @@ class Chromecast(object):
 
             # After handshake, use shorter timeout for message polling
             self._sock.settimeout(3)
+            self.t_connect = self._ticks_diff(self._ticks_ms(), _t0)
         except Exception:
             self.disconnect()
             raise
@@ -248,6 +261,14 @@ class Chromecast(object):
             parts.append("reject=%s" % self._text(self.last_error_detail))
         if self.first_media_status:
             parts.append("status=%s" % self._text(self.first_media_status))
+        # Stage timings last so existing parsing of the fields above is
+        # unaffected. c=connect+TLS handshake (5s budget), s=wait for session
+        # (8s), v=set volume plus its settle sleep, a=wait for media ack (8s,
+        # summed if the caller listened for a second window).
+        parts.append(
+            "ms=c%d/s%d/v%d/a%d"
+            % (self.t_connect, self.t_session, self.t_volume, self.t_ack)
+        )
         return " ".join(parts)
 
     # --- Utility Methods for Time (MicroPython compatibility) ---
@@ -298,6 +319,11 @@ class Chromecast(object):
         self.seen_types = []
         self.last_error_detail = None
         self.first_media_status = None
+        # t_connect belongs to the connection, not the play, so it survives a
+        # second play_url on the same object.
+        self.t_session = 0
+        self.t_volume = 0
+        self.t_ack = 0
 
         if isinstance(url, str):
             url_b = url.encode()
@@ -328,8 +354,10 @@ class Chromecast(object):
 
         # 4. Set volume AFTER app is running (before loading media)
         if volume is not None:
+            _t0 = self._ticks_ms()
             self.set_volume(volume)
             time.sleep(0.3)  # Let volume settle before loading media
+            self.t_volume = self._ticks_diff(self._ticks_ms(), _t0)
             print(f"Volume set to {volume} after app launch")
 
         self._send(
@@ -384,6 +412,7 @@ class Chromecast(object):
                 continue  # Retry on socket timeout, don't give up
             if self._is_playback_started(status):
                 self.last_error = None
+                self.t_ack += self._ticks_diff(self._ticks_ms(), start)
                 return True
             # Answer heartbeats before discarding anything, then record what
             # this was so a failure can say what the speaker actually replied.
@@ -394,6 +423,7 @@ class Chromecast(object):
                     # rest of the window (and then a whole second one) only
                     # delays an alert whose answer is already known.
                     self.last_error = ERR_NO_MEDIA_ACK
+                    self.t_ack += self._ticks_diff(self._ticks_ms(), start)
                     return False
             time.sleep(0.2)  # Brief delay to avoid busy-looping
 
@@ -404,6 +434,7 @@ class Chromecast(object):
         # this as a possible silent failure and read diagnostics() for what the
         # speaker actually sent instead.
         self.last_error = ERR_NO_MEDIA_ACK
+        self.t_ack += self._ticks_diff(self._ticks_ms(), start)
         return False
 
     @staticmethod
@@ -449,8 +480,10 @@ class Chromecast(object):
                     # Both come out of the same status message, so they always
                     # describe the same session.
                     session_id = self._extract(msg, b'"sessionId":"')
+                    self.t_session = self._ticks_diff(self._ticks_ms(), start)
                     return transport_id, session_id
 
+        self.t_session = self._ticks_diff(self._ticks_ms(), start)
         return None, None
 
     def disconnect(self):
