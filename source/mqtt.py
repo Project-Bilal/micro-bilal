@@ -32,6 +32,29 @@ def _unix_now():
     return time.time() + _UNIX_OFFSET
 
 
+def _ticks_ms():
+    try:
+        return time.ticks_ms()
+    except AttributeError:
+        return int(time.time() * 1000)
+
+
+def _ticks_diff(a, b):
+    try:
+        return time.ticks_diff(a, b)
+    except AttributeError:
+        return a - b
+
+
+def _connect_error(e):
+    """Which transient connect failure this is, or None if it is something else."""
+    text = str(e)
+    for candidate in _TRANSIENT_CONNECT_ERRORS:
+        if candidate in text:
+            return candidate
+    return None
+
+
 class MQTTHandler(object):
     def __init__(self, id):
         self.mqtt = None
@@ -675,6 +698,15 @@ class MQTTHandler(object):
         reason = None
         retried = False
         diag = ""
+        # What the connect attempts did, when the first one did not just work.
+        # Firmware 1.18. A play that failed to connect and then succeeded on the
+        # retry used to be indistinguishable from a clean play: the connect
+        # retry never set `retried`, and a diagnostic only exists once there is
+        # a Chromecast object, which a failed connect never produces. The only
+        # trace was an ntfy line on projectbilal-events, which ages out in about
+        # three days. That made the retry rate — the thing that moves before the
+        # failure rate does — wrong by exactly the retries we most want to see.
+        conn_note = ""
         self._play_count += 1
         try:
             print(
@@ -690,14 +722,12 @@ class MQTTHandler(object):
             gc.collect()
 
             # Create Chromecast connection (retry once if speaker is asleep)
+            _t0 = _ticks_ms()
             try:
                 device = Chromecast(ip, port)
             except OSError as e:
-                reason = None
-                for candidate in _TRANSIENT_CONNECT_ERRORS:
-                    if candidate in str(e):
-                        reason = candidate
-                        break
+                first_ms = _ticks_diff(_ticks_ms(), _t0)
+                reason = _connect_error(e)
                 if reason:
                     # A reforming group takes longer to come back than a
                     # sleeping speaker, so give ECONNRESET a longer breath.
@@ -713,10 +743,27 @@ class MQTTHandler(object):
                         priority=2,
                         tags="speaker",
                     )
+                    # The connect needed a second go, so this play was retried.
+                    # Only the session-level retry below used to say so, which
+                    # is why every ECONNRESET row in play_results reads
+                    # retried=False despite having tried twice.
+                    retried = True
                     gc.collect()
                     time.sleep(backoff)
                     self._feed_wdt()
-                    device = Chromecast(ip, port)
+                    _t1 = _ticks_ms()
+                    try:
+                        device = Chromecast(ip, port)
+                    except OSError as e2:
+                        conn_note = "conn=%s@%d,%s@%d" % (
+                            reason, first_ms,
+                            _connect_error(e2) or "error",
+                            _ticks_diff(_ticks_ms(), _t1),
+                        )
+                        raise
+                    conn_note = "conn=%s@%d,ok@%d" % (
+                        reason, first_ms, _ticks_diff(_ticks_ms(), _t1)
+                    )
                 else:
                     raise
 
@@ -882,8 +929,12 @@ class MQTTHandler(object):
                 # Firmware 1.16. What the speaker actually sent back, on the one
                 # path home that survives a post-cast WiFi drop. Bounded by
                 # cast.py (10 message types, 160 chars of error detail, 200 of
-                # status sample), so this cannot grow without that changing.
-                "diag": diag,
+                # status sample) plus 1.17's fixed-width timings and 1.18's
+                # conn= prefix, none of which can grow without that changing.
+                # conn_note leads: on a hard connect failure it is the only
+                # thing there is, because cast.py never got far enough to build
+                # a diagnostic.
+                "diag": (conn_note + " " + diag).strip() if conn_note else diag,
                 "timestamp": _unix_now(),
             })
             try:
